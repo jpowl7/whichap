@@ -120,7 +120,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         menu.autoenablesItems = false
 
         if let info, let ssid = info.ssid {
-            // AP Name
+            // AP Name (bold, prominent)
             let apDisplayName: String
             if let bssid = info.bssid, let mapped = apName(forBSSID: bssid) {
                 apDisplayName = mapped
@@ -129,7 +129,12 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             } else {
                 apDisplayName = ssid
             }
-            menu.addItem(disabledItem(apDisplayName))
+            let apItem = NSMenuItem(title: apDisplayName, action: nil, keyEquivalent: "")
+            apItem.attributedTitle = NSAttributedString(
+                string: apDisplayName,
+                attributes: [.font: NSFont.boldSystemFont(ofSize: 14)]
+            )
+            menu.addItem(apItem)
 
             // Location permission hint
             if !info.locationAuthorized {
@@ -144,30 +149,43 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
                 menu.addItem(hint)
             }
 
-            // SSID
+            menu.addItem(NSMenuItem.separator())
+
+            // SSID & Security
             menu.addItem(disabledItem("SSID: \(ssid)"))
-
-            // Band / Channel
-            menu.addItem(disabledItem("Band: \(info.band) | Ch \(info.channelNumber) (\(info.channelWidth))"))
-
-            // BSSID
+            menu.addItem(disabledItem("Security: \(info.security)"))
             menu.addItem(disabledItem("BSSID: \(info.bssid ?? "Unavailable")"))
 
-            // Signal
-            let quality = info.signalQuality.rawValue
-            menu.addItem(disabledItem("Signal: \(info.rssi) dBm (\(quality))"))
+            menu.addItem(NSMenuItem.separator())
 
-            // SNR
+            // Signal quality
+            let quality = info.signalQuality.rawValue
+            menu.addItem(disabledItem("Signal: \(info.rssi) dBm (\(quality)) — \(info.signalPercent)%"))
+            menu.addItem(disabledItem("Noise: \(info.noise) dBm — \(info.noisePercent)%"))
             menu.addItem(disabledItem("SNR: \(info.snr) dB"))
 
-            // Tx Rate
+            menu.addItem(NSMenuItem.separator())
+
+            // Connection details
+            menu.addItem(disabledItem("Band: \(info.band) | Ch \(info.channelNumber) (\(info.channelWidth))"))
+            menu.addItem(disabledItem("Mode: \(info.phyMode)"))
             let txFormatted = formatTxRate(info.transmitRate)
-            menu.addItem(disabledItem("Tx: \(txFormatted) Mbps"))
+            menu.addItem(disabledItem("Tx Rate: \(txFormatted) Mbps"))
+            menu.addItem(disabledItem("IP: \(info.ipAddress ?? "Unavailable")"))
         } else {
             menu.addItem(disabledItem("Not connected to Wi-Fi"))
         }
 
         menu.addItem(NSMenuItem.separator())
+
+        // Copy to Clipboard
+        if latestInfo?.ssid != nil {
+            let copyItem = NSMenuItem(title: "Copy Info to Clipboard", action: #selector(copyToClipboard), keyEquivalent: "c")
+            copyItem.target = self
+            menu.addItem(copyItem)
+
+            menu.addItem(NSMenuItem.separator())
+        }
 
         let prefsItem = NSMenuItem(title: "Preferences\u{2026}", action: #selector(showPreferences), keyEquivalent: ",")
         prefsItem.target = self
@@ -199,6 +217,39 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     }
 
     // MARK: - Menu Actions
+
+    @objc private func copyToClipboard() {
+        guard let info = latestInfo, let ssid = info.ssid else { return }
+
+        let apName: String
+        if let bssid = info.bssid, let mapped = self.apName(forBSSID: bssid) {
+            apName = mapped
+        } else {
+            apName = "Unknown"
+        }
+
+        let txFormatted = formatTxRate(info.transmitRate)
+        let quality = info.signalQuality.rawValue
+
+        let text = """
+        Wi-Fi Connection Info
+        ─────────────────────
+        AP Name:   \(apName)
+        SSID:      \(ssid)
+        Security:  \(info.security)
+        BSSID:     \(info.bssid ?? "Unavailable")
+        Signal:    \(info.rssi) dBm (\(quality)) — \(info.signalPercent)%
+        Noise:     \(info.noise) dBm — \(info.noisePercent)%
+        SNR:       \(info.snr) dB
+        Band:      \(info.band) | Ch \(info.channelNumber) (\(info.channelWidth))
+        Mode:      \(info.phyMode)
+        Tx Rate:   \(txFormatted) Mbps
+        IP:        \(info.ipAddress ?? "Unavailable")
+        """
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
 
     @objc private func showPreferences() {
         if preferencesWindowController == nil {

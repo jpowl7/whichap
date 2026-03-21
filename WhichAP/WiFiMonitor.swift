@@ -14,10 +14,24 @@ struct WiFiConnectionInfo {
     let band: String
     let transmitRate: Double
     let locationAuthorized: Bool
+    let phyMode: String
+    let security: String
+    let ipAddress: String?
 
     /// Signal-to-noise ratio as a positive value.
     var snr: Int {
         return rssi - noise
+    }
+
+    /// Signal strength as a percentage (0–100).
+    var signalPercent: Int {
+        return max(0, min(100, 2 * (100 + rssi)))
+    }
+
+    /// Noise floor as a percentage (0–100), where lower is better.
+    var noisePercent: Int {
+        // Noise is typically -80 to -100 dBm; map to 0-100 where 0% = -100, 100% = 0
+        return max(0, min(100, 100 + noise))
     }
 
     /// Human-readable signal quality derived from RSSI.
@@ -203,6 +217,9 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
         let channelNumber = channel?.channelNumber ?? 0
         let channelWidth = channel.map { humanReadableWidth($0.channelWidth) } ?? "Unknown"
         let band = channel.map { humanReadableBand($0.channelBand) } ?? "?"
+        let phyMode = humanReadablePHYMode(interface.activePHYMode())
+        let security = humanReadableSecurity(interface.security())
+        let ipAddress = Self.getWiFiIPAddress()
 
         return WiFiConnectionInfo(
             ssid: ssid,
@@ -213,7 +230,10 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
             channelWidth: channelWidth,
             band: band,
             transmitRate: txRate,
-            locationAuthorized: locationAuthorized
+            locationAuthorized: locationAuthorized,
+            phyMode: phyMode,
+            security: security,
+            ipAddress: ipAddress
         )
     }
 
@@ -265,5 +285,79 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
         @unknown default:
             return "\(width.rawValue) MHz"
         }
+    }
+
+    // MARK: PHY mode
+
+    private func humanReadablePHYMode(_ mode: CWPHYMode) -> String {
+        switch mode {
+        case .mode11a:   return "802.11a"
+        case .mode11b:   return "802.11b"
+        case .mode11g:   return "802.11g"
+        case .mode11n:   return "802.11n (Wi-Fi 4)"
+        case .mode11ac:  return "802.11ac (Wi-Fi 5)"
+        case .mode11ax:  return "802.11ax (Wi-Fi 6)"
+        case .modeNone:  return "None"
+        @unknown default: return "Unknown"
+        }
+    }
+
+    // MARK: Security
+
+    private func humanReadableSecurity(_ security: CWSecurity) -> String {
+        switch security {
+        case .wpa3Personal:      return "WPA3 Personal"
+        case .wpa3Enterprise:    return "WPA3 Enterprise"
+        case .wpa3Transition:    return "WPA3/WPA2"
+        case .wpa2Personal:      return "WPA2 Personal"
+        case .wpa2Enterprise:    return "WPA2 Enterprise"
+        case .wpaPersonal:       return "WPA Personal"
+        case .wpaPersonalMixed:  return "WPA/WPA2 Personal"
+        case .wpaEnterprise:     return "WPA Enterprise"
+        case .wpaEnterpriseMixed: return "WPA/WPA2 Enterprise"
+        case .dynamicWEP:        return "Dynamic WEP"
+        case .none:              return "Open"
+        case .OWE:               return "OWE"
+        case .oweTransition:     return "OWE Transition"
+        case .unknown:           return "Unknown"
+        @unknown default:        return "Unknown"
+        }
+    }
+
+    // MARK: IP address
+
+    /// Returns the IPv4 address of the Wi-Fi interface (en0).
+    static func getWiFiIPAddress() -> String? {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
+        defer { freeifaddrs(ifaddr) }
+
+        var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
+        while let current = ptr {
+            defer { ptr = current.pointee.ifa_next }
+
+            let flags = Int32(current.pointee.ifa_flags)
+            guard (flags & IFF_UP) != 0, (flags & IFF_RUNNING) != 0 else { continue }
+
+            let family = current.pointee.ifa_addr.pointee.sa_family
+            guard family == UInt8(AF_INET) else { continue }  // IPv4 only
+
+            guard let name = current.pointee.ifa_name,
+                  String(cString: name) == "en0" else { continue }
+
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let result = getnameinfo(
+                current.pointee.ifa_addr,
+                socklen_t(current.pointee.ifa_addr.pointee.sa_len),
+                &hostname,
+                socklen_t(hostname.count),
+                nil, 0,
+                NI_NUMERICHOST
+            )
+            if result == 0 {
+                return String(cString: hostname)
+            }
+        }
+        return nil
     }
 }
