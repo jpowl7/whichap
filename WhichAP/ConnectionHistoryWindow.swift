@@ -63,7 +63,7 @@ final class ConnectionHistoryWindowController: NSWindowController, NSTableViewDa
         let clearButton = NSButton(title: "Clear History", target: self, action: #selector(clearHistory))
         clearButton.translatesAutoresizingMaskIntoConstraints = false
 
-        let contentView = window.contentView!
+        guard let contentView = window.contentView else { return }
         contentView.addSubview(scrollView)
         contentView.addSubview(clearButton)
 
@@ -148,9 +148,9 @@ final class ConnectionHistoryWindowController: NSWindowController, NSTableViewDa
             cell = NSTextField(labelWithString: "")
             cell.identifier = cellId
             cell.lineBreakMode = .byTruncatingTail
+            cell.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         }
         cell.stringValue = text
-        cell.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         return cell
     }
 }

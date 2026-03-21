@@ -45,6 +45,9 @@ final class BSSIDMapping {
     /// Parses JSON data. Tries Ruckus Data Studio format first, then falls back
     /// to a simple array-of-objects format.
     func loadFromData(_ data: Data) {
+        // Reject unreasonably large mapping files (10 MB)
+        guard data.count < 10_000_000 else { return }
+
         guard let json = try? JSONSerialization.jsonObject(with: data) else {
             return
         }
@@ -99,6 +102,9 @@ final class BSSIDMapping {
     /// Returns the AP name for the given BSSID, or `nil` if not found.
     /// The BSSID is normalized before lookup, so any format is accepted.
     func apName(forBSSID bssid: String) -> String? {
+        // Fast path: try direct lookup first (works if already normalized)
+        if let name = mapping[bssid] { return name }
+        // Slow path: normalize and retry
         let normalized = normalizeBSSID(bssid)
         return mapping[normalized]
     }

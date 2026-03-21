@@ -35,9 +35,7 @@ struct WiFiConnectionInfo {
     }
 
     /// Human-readable signal quality derived from RSSI.
-    var signalQuality: SignalQuality {
-        return SignalQuality(rssi: rssi)
-    }
+    let signalQuality: SignalQuality
 }
 
 // MARK: - SignalQuality
@@ -86,7 +84,9 @@ final class ConnectionHistoryStore {
     private let decoder: JSONDecoder
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            fatalError("Cannot access Application Support directory")
+        }
         let dir = appSupport.appendingPathComponent("WhichAP", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("connection-history.json")
@@ -154,9 +154,7 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
     private(set) var connectedToAPSince: Date?
 
     /// History of AP connections, newest first
-    private(set) var connectionHistory: [ConnectionEvent] = [] {
-        didSet { ConnectionHistoryStore.shared.save(connectionHistory) }
-    }
+    private(set) var connectionHistory: [ConnectionEvent] = []
 
     private(set) var locationAuthorized: Bool = false
     private(set) var latestInfo: WiFiConnectionInfo?
@@ -204,6 +202,24 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
 
     func clearHistory() {
         connectionHistory.removeAll()
+        ConnectionHistoryStore.shared.save(connectionHistory)
+    }
+
+    private func recordConnectionEvent(for info: WiFiConnectionInfo) {
+        let apName = info.bssid.flatMap { BSSIDMapping.shared.apName(forBSSID: $0) }
+        let event = ConnectionEvent(
+            timestamp: Date(),
+            ssid: info.ssid,
+            bssid: info.bssid,
+            apName: apName,
+            rssi: info.rssi,
+            band: info.band
+        )
+        connectionHistory.insert(event, at: 0)
+        if connectionHistory.count > 100 {
+            connectionHistory.removeSubrange(100...)
+        }
+        ConnectionHistoryStore.shared.save(connectionHistory)
     }
 
     func poll() {
@@ -234,20 +250,7 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
         if currentBSSID != lastBSSID {
             // BSSID changed — record history event and enter roaming state
             let now = Date()
-            let apName = currentBSSID.flatMap { BSSIDMapping.shared.apName(forBSSID: $0) }
-            let event = ConnectionEvent(
-                timestamp: now,
-                ssid: info.ssid,
-                bssid: currentBSSID,
-                apName: apName,
-                rssi: info.rssi,
-                band: info.band
-            )
-            connectionHistory.insert(event, at: 0)
-            // Keep last 100 events
-            if connectionHistory.count > 100 {
-                connectionHistory = Array(connectionHistory.prefix(100))
-            }
+            recordConnectionEvent(for: info)
 
             lastBSSID = currentBSSID
             bssidStableSince = now
@@ -266,19 +269,7 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
         } else if pollState == .disconnected {
             // Transitioned from disconnected to connected
             let now = Date()
-            let apName = currentBSSID.flatMap { BSSIDMapping.shared.apName(forBSSID: $0) }
-            let event = ConnectionEvent(
-                timestamp: now,
-                ssid: info.ssid,
-                bssid: currentBSSID,
-                apName: apName,
-                rssi: info.rssi,
-                band: info.band
-            )
-            connectionHistory.insert(event, at: 0)
-            if connectionHistory.count > 100 {
-                connectionHistory = Array(connectionHistory.prefix(100))
-            }
+            recordConnectionEvent(for: info)
 
             lastBSSID = currentBSSID
             bssidStableSince = now
@@ -327,7 +318,8 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
             locationAuthorized: locationAuthorized,
             phyMode: phyMode,
             security: security,
-            ipAddress: ipAddress
+            ipAddress: ipAddress,
+            signalQuality: SignalQuality(rssi: rssi)
         )
     }
 

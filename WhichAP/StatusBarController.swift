@@ -117,11 +117,13 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     // MARK: - Settings Change Handlers
 
     @objc private func displaySettingsChanged() {
+        refreshCachedSettings()
         updateMenuBarText(with: latestInfo)
         updateMenu(with: latestInfo)
     }
 
     @objc private func mappingChanged() {
+        refreshCachedSettings()
         updateMenuBarText(with: latestInfo)
         updateMenu(with: latestInfo)
     }
@@ -132,23 +134,37 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         return BSSIDMapping.shared.apName(forBSSID: bssid)
     }
 
-    // MARK: - Display Settings
+    // MARK: - Display Settings (cached, refreshed on settings change)
 
-    private var maxNameLength: Int {
+    private var cachedMaxNameLength: Int = {
         let val = UserDefaults.standard.integer(forKey: "apNameMaxLength")
         return val > 0 ? val : 20
-    }
+    }()
 
-    private var showBand: Bool {
-        if UserDefaults.standard.object(forKey: "showBand") == nil {
-            return true
-        }
+    private var cachedShowBand: Bool = {
+        if UserDefaults.standard.object(forKey: "showBand") == nil { return true }
         return UserDefaults.standard.bool(forKey: "showBand")
+    }()
+
+    private func refreshCachedSettings() {
+        let val = UserDefaults.standard.integer(forKey: "apNameMaxLength")
+        cachedMaxNameLength = val > 0 ? val : 20
+        if UserDefaults.standard.object(forKey: "showBand") == nil {
+            cachedShowBand = true
+        } else {
+            cachedShowBand = UserDefaults.standard.bool(forKey: "showBand")
+        }
     }
 
-    // MARK: - Menu Bar Text
+    // MARK: - Menu Bar Text (with change tracking)
 
     private var stackView: NSStackView?
+    private var lastMenuBarTop: String?
+    private var lastMenuBarBottom: String?
+    private var lastMenuBarPoor: Bool?
+    private var lastApDisplayName: String?
+    private var lastSignalText: String?
+    private var lastSignalPoor: Bool?
 
     private func updateMenuBarText(with info: WiFiConnectionInfo?) {
         guard let button = statusItem.button else { return }
@@ -168,10 +184,18 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         // Bottom line: AP name (if available)
         let bottomLine: String?
         if let bssid = info.bssid, let name = apName(forBSSID: bssid) {
-            bottomLine = truncatedName(name, limit: maxNameLength)
+            bottomLine = truncatedName(name, limit: cachedMaxNameLength)
         } else {
             bottomLine = nil
         }
+
+        // Skip update if nothing changed
+        if topLine == lastMenuBarTop && bottomLine == lastMenuBarBottom && isPoorSignal == lastMenuBarPoor {
+            return
+        }
+        lastMenuBarTop = topLine
+        lastMenuBarBottom = bottomLine
+        lastMenuBarPoor = isPoorSignal
 
         if let bottomLine {
             button.title = ""
@@ -355,10 +379,13 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         } else {
             apDisplayName = ssid
         }
-        apNameItem.attributedTitle = NSAttributedString(
-            string: apDisplayName,
-            attributes: [.font: NSFont.boldSystemFont(ofSize: 14)]
-        )
+        if apDisplayName != lastApDisplayName {
+            lastApDisplayName = apDisplayName
+            apNameItem.attributedTitle = NSAttributedString(
+                string: apDisplayName,
+                attributes: [.font: NSFont.boldSystemFont(ofSize: 14)]
+            )
+        }
 
         locationHintItem.isHidden = info.locationAuthorized
 
@@ -371,14 +398,18 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         let quality = info.signalQuality.rawValue
         let isPoorSignal = info.signalQuality == .poor || info.signalQuality == .bad
         let signalText = "Signal: \(info.rssi) dBm (\(quality)) — \(info.signalPercent)%"
-        if isPoorSignal {
-            signalItem.attributedTitle = NSAttributedString(
-                string: signalText,
-                attributes: [.foregroundColor: NSColor.systemRed]
-            )
-        } else {
-            signalItem.attributedTitle = nil
-            signalItem.title = signalText
+        if signalText != lastSignalText || isPoorSignal != lastSignalPoor {
+            lastSignalText = signalText
+            lastSignalPoor = isPoorSignal
+            if isPoorSignal {
+                signalItem.attributedTitle = NSAttributedString(
+                    string: signalText,
+                    attributes: [.foregroundColor: NSColor.systemRed]
+                )
+            } else {
+                signalItem.attributedTitle = nil
+                signalItem.title = signalText
+            }
         }
         noiseItem.title = "Noise: \(info.noise) dBm — \(info.noisePercent)%"
         snrItem.title = "SNR: \(info.snr) dB"
