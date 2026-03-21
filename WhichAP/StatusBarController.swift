@@ -5,8 +5,38 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let wifiMonitor = WiFiMonitor()
     private var preferencesWindowController: PreferencesWindowController?
+    private var historyWindowController: ConnectionHistoryWindowController?
 
     private var latestInfo: WiFiConnectionInfo?
+    private var menuUpdateTimer: Timer?
+
+    // MARK: - Persistent menu items (updated in place for live refresh)
+
+    private let menu = NSMenu()
+
+    private let apNameItem = NSMenuItem()
+    private let locationHintItem = NSMenuItem()
+    private let ssidItem = NSMenuItem()
+    private let securityItem = NSMenuItem()
+    private let bssidItem = NSMenuItem()
+    private let signalItem = NSMenuItem()
+    private let noiseItem = NSMenuItem()
+    private let snrItem = NSMenuItem()
+    private let bandItem = NSMenuItem()
+    private let modeItem = NSMenuItem()
+    private let txRateItem = NSMenuItem()
+    private let ipItem = NSMenuItem()
+    private let connectedTimeItem = NSMenuItem()
+    private let disconnectedItem = NSMenuItem()
+
+    private let sep1 = NSMenuItem.separator()
+    private let sep2 = NSMenuItem.separator()
+    private let sep3 = NSMenuItem.separator()
+    private let sep4 = NSMenuItem.separator()
+    private let copyItem = NSMenuItem()
+    private let sep5 = NSMenuItem.separator()
+
+    private var menuIsConnected: Bool? = nil
 
     // MARK: - Lifecycle
 
@@ -14,7 +44,25 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         super.init()
 
         statusItem.button?.title = "WhichAP"
-        rebuildMenu(with: nil)
+
+        menu.autoenablesItems = false
+        statusItem.menu = menu
+        buildMenuStructure()
+        updateMenu(with: nil)
+
+        // Update connected time every second while menu is open
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(menuDidOpen),
+            name: NSMenu.didBeginTrackingNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(menuDidClose),
+            name: NSMenu.didEndTrackingNotification,
+            object: nil
+        )
 
         wifiMonitor.delegate = self
 
@@ -39,20 +87,43 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             guard let self else { return }
             self.latestInfo = info
             self.updateMenuBarText(with: info)
-            self.rebuildMenu(with: info)
+            self.updateMenu(with: info)
         }
+    }
+
+    // MARK: - Menu Open/Close (live timer)
+
+    @objc private func menuDidOpen() {
+        menuUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateConnectedTime()
+        }
+    }
+
+    @objc private func menuDidClose() {
+        menuUpdateTimer?.invalidate()
+        menuUpdateTimer = nil
+    }
+
+    private func updateConnectedTime() {
+        guard let since = wifiMonitor.connectedToAPSince else {
+            connectedTimeItem.isHidden = true
+            return
+        }
+        connectedTimeItem.isHidden = false
+        let elapsed = Int(Date().timeIntervalSince(since))
+        connectedTimeItem.title = "Connected: \(formatDuration(elapsed))"
     }
 
     // MARK: - Settings Change Handlers
 
     @objc private func displaySettingsChanged() {
         updateMenuBarText(with: latestInfo)
-        rebuildMenu(with: latestInfo)
+        updateMenu(with: latestInfo)
     }
 
     @objc private func mappingChanged() {
         updateMenuBarText(with: latestInfo)
-        rebuildMenu(with: latestInfo)
+        updateMenu(with: latestInfo)
     }
 
     // MARK: - AP Name Lookup
@@ -77,10 +148,13 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
     // MARK: - Menu Bar Text
 
+    private var stackView: NSStackView?
+
     private func updateMenuBarText(with info: WiFiConnectionInfo?) {
         guard let button = statusItem.button else { return }
 
         guard let info, let ssid = info.ssid else {
+            removeStackView()
             button.title = "No Wi-Fi"
             button.appearsDisabled = true
             return
@@ -88,24 +162,89 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
         button.appearsDisabled = false
 
+        let topLine = ssid
+        let isPoorSignal = info.signalQuality == .poor || info.signalQuality == .bad
+
+        // Bottom line: AP name (if available)
+        let bottomLine: String?
         if let bssid = info.bssid, let name = apName(forBSSID: bssid) {
-            let displayName = truncatedName(name, limit: maxNameLength)
-            if showBand {
-                button.title = "\(displayName) | \(info.band)"
-            } else {
-                button.title = displayName
-            }
-        } else if !info.locationAuthorized {
-            // No location permission — show SSID only (no band), per PRD
-            button.title = ssid
+            bottomLine = truncatedName(name, limit: maxNameLength)
         } else {
-            // BSSID available but not in mapping — show SSID with band
-            if showBand {
-                button.title = "\(ssid) | \(info.band)"
+            bottomLine = nil
+        }
+
+        if let bottomLine {
+            button.title = ""
+            setupStackView(topLine: topLine, bottomLine: bottomLine, poorSignal: isPoorSignal, in: button)
+        } else {
+            removeStackView()
+            if isPoorSignal {
+                button.attributedTitle = NSAttributedString(string: topLine, attributes: [
+                    .foregroundColor: NSColor.systemRed,
+                    .font: NSFont.menuBarFont(ofSize: 0),
+                ])
             } else {
-                button.title = ssid
+                button.attributedTitle = NSAttributedString(string: "")
+                button.title = topLine
             }
         }
+    }
+
+    private func setupStackView(topLine: String, bottomLine: String, poorSignal: Bool, in button: NSStatusBarButton) {
+        let topLabel: NSTextField
+        let bottomLabel: NSTextField
+        let textColor: NSColor = poorSignal ? .systemRed : .controlTextColor
+
+        if let existing = stackView {
+            // Reuse existing labels
+            topLabel = existing.arrangedSubviews[0] as! NSTextField
+            bottomLabel = existing.arrangedSubviews[1] as! NSTextField
+            topLabel.stringValue = topLine
+            bottomLabel.stringValue = bottomLine
+            topLabel.textColor = textColor
+            bottomLabel.textColor = textColor
+        } else {
+            // Create new stack
+            topLabel = NSTextField(labelWithString: topLine)
+            topLabel.font = NSFont.menuBarFont(ofSize: 10)
+            topLabel.alignment = .center
+            topLabel.textColor = textColor
+
+            bottomLabel = NSTextField(labelWithString: bottomLine)
+            bottomLabel.font = NSFont.menuBarFont(ofSize: 9)
+            bottomLabel.alignment = .center
+            bottomLabel.textColor = textColor
+
+            let stack = NSStackView(views: [topLabel, bottomLabel])
+            stack.orientation = .vertical
+            stack.spacing = -2
+            stack.alignment = .centerX
+            stack.translatesAutoresizingMaskIntoConstraints = false
+
+            button.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+                stack.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            ])
+
+            // Let the button size to fit the stack
+            topLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            bottomLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            self.stackView = stack
+        }
+
+        // Update button width to fit the wider label
+        let topWidth = topLabel.intrinsicContentSize.width
+        let bottomWidth = bottomLabel.intrinsicContentSize.width
+        let neededWidth = max(topWidth, bottomWidth) + 8
+        statusItem.length = neededWidth
+    }
+
+    private func removeStackView() {
+        stackView?.removeFromSuperview()
+        stackView = nil
+        statusItem.length = NSStatusItem.variableLength
     }
 
     private func truncatedName(_ name: String, limit: Int) -> String {
@@ -113,79 +252,42 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         return "\(String(name.prefix(limit)))\u{2026}"
     }
 
-    // MARK: - Dropdown Menu
+    // MARK: - Menu Structure (built once)
 
-    private func rebuildMenu(with info: WiFiConnectionInfo?) {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
+    private func buildMenuStructure() {
+        menu.addItem(apNameItem)
+        menu.addItem(locationHintItem)
+        menu.addItem(sep1)
+        menu.addItem(ssidItem)
+        menu.addItem(securityItem)
+        menu.addItem(bssidItem)
+        menu.addItem(sep2)
+        menu.addItem(signalItem)
+        menu.addItem(noiseItem)
+        menu.addItem(snrItem)
+        menu.addItem(sep3)
+        menu.addItem(bandItem)
+        menu.addItem(modeItem)
+        menu.addItem(txRateItem)
+        menu.addItem(ipItem)
+        menu.addItem(connectedTimeItem)
 
-        if let info, let ssid = info.ssid {
-            // AP Name (bold, prominent)
-            let apDisplayName: String
-            if let bssid = info.bssid, let mapped = apName(forBSSID: bssid) {
-                apDisplayName = mapped
-            } else if info.bssid != nil {
-                apDisplayName = "Unknown AP"
-            } else {
-                apDisplayName = ssid
-            }
-            let apItem = NSMenuItem(title: apDisplayName, action: nil, keyEquivalent: "")
-            apItem.attributedTitle = NSAttributedString(
-                string: apDisplayName,
-                attributes: [.font: NSFont.boldSystemFont(ofSize: 14)]
-            )
-            menu.addItem(apItem)
+        menu.addItem(disconnectedItem)
 
-            // Location permission hint
-            if !info.locationAuthorized {
-                let hint = disabledItem("Enable Location Services to see AP name")
-                hint.attributedTitle = NSAttributedString(
-                    string: hint.title,
-                    attributes: [
-                        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                        .foregroundColor: NSColor.secondaryLabelColor,
-                    ]
-                )
-                menu.addItem(hint)
-            }
+        menu.addItem(sep4)
 
-            menu.addItem(NSMenuItem.separator())
+        copyItem.title = "Copy Info to Clipboard"
+        copyItem.action = #selector(copyToClipboard)
+        copyItem.target = self
+        copyItem.keyEquivalent = "c"
+        menu.addItem(copyItem)
+        menu.addItem(sep5)
 
-            // SSID & Security
-            menu.addItem(disabledItem("SSID: \(ssid)"))
-            menu.addItem(disabledItem("Security: \(info.security)"))
-            menu.addItem(disabledItem("BSSID: \(info.bssid ?? "Unavailable")"))
-
-            menu.addItem(NSMenuItem.separator())
-
-            // Signal quality
-            let quality = info.signalQuality.rawValue
-            menu.addItem(disabledItem("Signal: \(info.rssi) dBm (\(quality)) — \(info.signalPercent)%"))
-            menu.addItem(disabledItem("Noise: \(info.noise) dBm — \(info.noisePercent)%"))
-            menu.addItem(disabledItem("SNR: \(info.snr) dB"))
-
-            menu.addItem(NSMenuItem.separator())
-
-            // Connection details
-            menu.addItem(disabledItem("Band: \(info.band) | Ch \(info.channelNumber) (\(info.channelWidth))"))
-            menu.addItem(disabledItem("Mode: \(info.phyMode)"))
-            let txFormatted = formatTxRate(info.transmitRate)
-            menu.addItem(disabledItem("Tx Rate: \(txFormatted) Mbps"))
-            menu.addItem(disabledItem("IP: \(info.ipAddress ?? "Unavailable")"))
-        } else {
-            menu.addItem(disabledItem("Not connected to Wi-Fi"))
-        }
+        let historyItem = NSMenuItem(title: "Connection History\u{2026}", action: #selector(showHistory), keyEquivalent: "h")
+        historyItem.target = self
+        menu.addItem(historyItem)
 
         menu.addItem(NSMenuItem.separator())
-
-        // Copy to Clipboard
-        if latestInfo?.ssid != nil {
-            let copyItem = NSMenuItem(title: "Copy Info to Clipboard", action: #selector(copyToClipboard), keyEquivalent: "c")
-            copyItem.target = self
-            menu.addItem(copyItem)
-
-            menu.addItem(NSMenuItem.separator())
-        }
 
         let prefsItem = NSMenuItem(title: "Preferences\u{2026}", action: #selector(showPreferences), keyEquivalent: ",")
         prefsItem.target = self
@@ -199,12 +301,96 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        locationHintItem.attributedTitle = NSAttributedString(
+            string: "Enable Location Services to see AP name",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
     }
 
-    private func disabledItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        return item
+    // MARK: - Live Menu Updates
+
+    private func updateMenu(with info: WiFiConnectionInfo?) {
+        let isConnected = info?.ssid != nil
+
+        if menuIsConnected != isConnected {
+            menuIsConnected = isConnected
+
+            apNameItem.isHidden = !isConnected
+            locationHintItem.isHidden = true
+            sep1.isHidden = !isConnected
+            ssidItem.isHidden = !isConnected
+            securityItem.isHidden = !isConnected
+            bssidItem.isHidden = !isConnected
+            sep2.isHidden = !isConnected
+            signalItem.isHidden = !isConnected
+            noiseItem.isHidden = !isConnected
+            snrItem.isHidden = !isConnected
+            sep3.isHidden = !isConnected
+            bandItem.isHidden = !isConnected
+            modeItem.isHidden = !isConnected
+            txRateItem.isHidden = !isConnected
+            ipItem.isHidden = !isConnected
+            connectedTimeItem.isHidden = !isConnected
+
+            disconnectedItem.isHidden = isConnected
+
+            copyItem.isHidden = !isConnected
+            sep5.isHidden = !isConnected
+        }
+
+        guard let info, let ssid = info.ssid else {
+            disconnectedItem.title = "Not connected to Wi-Fi"
+            return
+        }
+
+        // AP Name
+        let apDisplayName: String
+        if let bssid = info.bssid, let mapped = apName(forBSSID: bssid) {
+            apDisplayName = mapped
+        } else if info.bssid != nil {
+            apDisplayName = "Unknown AP Name"
+        } else {
+            apDisplayName = ssid
+        }
+        apNameItem.attributedTitle = NSAttributedString(
+            string: apDisplayName,
+            attributes: [.font: NSFont.boldSystemFont(ofSize: 14)]
+        )
+
+        locationHintItem.isHidden = info.locationAuthorized
+
+        // Network info
+        ssidItem.title = "SSID: \(ssid)"
+        securityItem.title = "Security: \(info.security)"
+        bssidItem.title = "BSSID: \(info.bssid ?? "Unavailable")"
+
+        // Signal quality
+        let quality = info.signalQuality.rawValue
+        let isPoorSignal = info.signalQuality == .poor || info.signalQuality == .bad
+        let signalText = "Signal: \(info.rssi) dBm (\(quality)) — \(info.signalPercent)%"
+        if isPoorSignal {
+            signalItem.attributedTitle = NSAttributedString(
+                string: signalText,
+                attributes: [.foregroundColor: NSColor.systemRed]
+            )
+        } else {
+            signalItem.attributedTitle = nil
+            signalItem.title = signalText
+        }
+        noiseItem.title = "Noise: \(info.noise) dBm — \(info.noisePercent)%"
+        snrItem.title = "SNR: \(info.snr) dB"
+
+        // Connection details
+        bandItem.title = "Band: \(info.band) | Ch \(info.channelNumber) (\(info.channelWidth))"
+        modeItem.title = "Mode: \(info.phyMode)"
+        txRateItem.title = "Tx Rate: \(formatTxRate(info.transmitRate)) Mbps"
+        ipItem.title = "IP: \(info.ipAddress ?? "Unavailable")"
+
+        // Connected time
+        updateConnectedTime()
     }
 
     // MARK: - Formatting Helpers
@@ -214,6 +400,22 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             return String(format: "%.0f", rate)
         }
         return String(format: "%.1f", rate)
+    }
+
+    private func formatDuration(_ seconds: Int) -> String {
+        if seconds < 60 {
+            return "\(seconds)s"
+        }
+        let minutes = seconds / 60
+        if minutes < 60 {
+            return "\(minutes)m"
+        }
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        if remainingMinutes == 0 {
+            return "\(hours)h"
+        }
+        return "\(hours)h \(remainingMinutes)m"
     }
 
     // MARK: - Menu Actions
@@ -251,6 +453,19 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    @objc private func showHistory() {
+        if historyWindowController == nil {
+            let controller = ConnectionHistoryWindowController()
+            controller.onClear = { [weak self] in
+                self?.wifiMonitor.clearHistory()
+            }
+            historyWindowController = controller
+        }
+        historyWindowController?.update(with: wifiMonitor.connectionHistory)
+        historyWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func showPreferences() {
         if preferencesWindowController == nil {
             preferencesWindowController = PreferencesWindowController()
@@ -264,7 +479,15 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
         let alert = NSAlert()
         alert.messageText = "WhichAP"
-        alert.informativeText = "Version \(version) (Build \(build))\n\nA lightweight menu bar utility that shows which access point you are connected to."
+        alert.informativeText = """
+        Version \(version) (Build \(build))
+
+        A lightweight menu bar utility that shows which SSID and access point you are connected to (you must provide your mapping of BSSIDs to AP names).
+
+        Clicking on the AP name provides a quick look at details of the connection, connection history, and ability to copy this info to include in a support ticket.
+
+        App by Jason Powell
+        """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
 

@@ -15,6 +15,7 @@
 		A1B2C3D4E5F60001000A0006 /* BSSIDMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A0009 /* BSSIDMapping.swift */; };
 		A1B2C3D4E5F60001000A0007 /* default-mapping.json in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A000A /* default-mapping.json */; };
 		A1B2C3D4E5F60001000A0008 /* PreferencesWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A000B /* PreferencesWindow.swift */; };
+		AA89E7300BD02824136DBF3F /* ConnectionHistoryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A241E247760A8CD62AE6A955 /* ConnectionHistoryWindow.swift */; };
 		A1B2C3D4E5F60001000A0009 /* MappingUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A000C /* MappingUpdater.swift */; };
 		A1B2C3D4E5F60001000A0010 /* CoreWLAN.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A0010 /* CoreWLAN.framework */; };
 		A1B2C3D4E5F60001000A0011 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A0011 /* CoreLocation.framework */; };
@@ -33,6 +34,7 @@
 		A1B2C3D4E5F60002000A0009 /* BSSIDMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BSSIDMapping.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002000A000A /* default-mapping.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "default-mapping.json"; path = "Resources/default-mapping.json"; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F60002000A000B /* PreferencesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesWindow.swift; sourceTree = "<group>"; };
+		A241E247760A8CD62AE6A955 /* ConnectionHistoryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionHistoryWindow.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002000A000C /* MappingUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MappingUpdater.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002000A0010 /* CoreWLAN.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreWLAN.framework; path = System/Library/Frameworks/CoreWLAN.framework; sourceTree = SDKROOT; };
 		A1B2C3D4E5F60002000A0011 /* CoreLocation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreLocation.framework; path = System/Library/Frameworks/CoreLocation.framework; sourceTree = SDKROOT; };
@@ -72,6 +74,7 @@
 				A1B2C3D4E5F60002000A0003 /* WiFiMonitor.swift */,
 				A1B2C3D4E5F60002000A0009 /* BSSIDMapping.swift */,
 				A1B2C3D4E5F60002000A000B /* PreferencesWindow.swift */,
+				A241E247760A8CD62AE6A955 /* ConnectionHistoryWindow.swift */,
 				A1B2C3D4E5F60002000A000C /* MappingUpdater.swift */,
 				A1B2C3D4E5F60002000A0004 /* Assets.xcassets */,
 				A1B2C3D4E5F60002000A0005 /* Info.plist */,
@@ -182,6 +185,7 @@
 				A1B2C3D4E5F60001000A0003 /* WiFiMonitor.swift in Sources */,
 				A1B2C3D4E5F60001000A0006 /* BSSIDMapping.swift in Sources */,
 				A1B2C3D4E5F60001000A0008 /* PreferencesWindow.swift in Sources */,
+				AA89E7300BD02824136DBF3F /* ConnectionHistoryWindow.swift in Sources */,
 				A1B2C3D4E5F60001000A0009 /* MappingUpdater.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
