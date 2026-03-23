@@ -1,4 +1,5 @@
 import Cocoa
+import CoreWLAN
 import ServiceManagement
 
 // MARK: - UserDefaults Keys
@@ -29,10 +30,20 @@ final class PreferencesWindowController: NSWindowController {
     private var showBandCheckbox: NSButton!
     private var launchCheckbox:   NSButton!
 
+    // Manual entry controls
+    private var manualApNameField:  NSTextField!
+    private var manualBssidField:   NSTextField!
+    private var addEntryButton:     NSButton!
+    private var manualCountLabel:   NSTextField!
+    private var manualApNameRow:    NSView!
+    private var manualBssidRow:     NSView!
+    private var manualButtonRow:    NSView!
+
     // Rows that toggle visibility
     private var fileRow:     NSView!
     private var urlRow:      NSView!
     private var intervalRow: NSView!
+    private var formatHintRow: NSView!
 
     // Container that holds all rows — we recalculate its layout on source change
     private var contentView: NSView!
@@ -46,7 +57,7 @@ final class PreferencesWindowController: NSWindowController {
     // MARK: Geometry constants
 
     private let windowWidth:  CGFloat = 420
-    private let windowHeight: CGFloat = 320
+    private let windowHeight: CGFloat = 500
     private let sideMargin:   CGFloat = 20
     private let rowHeight:    CGFloat = 26
     private let rowSpacing:   CGFloat = 8
@@ -57,7 +68,7 @@ final class PreferencesWindowController: NSWindowController {
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 500),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -74,6 +85,16 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     override func showWindow(_ sender: Any?) {
+        // Pre-fill current BSSID if connected
+        if let bssid = CWWiFiClient.shared().interface()?.bssid() {
+            manualBssidField.stringValue = bssid.split(separator: ":")
+                .map { octet -> String in
+                    let hex = String(octet).uppercased()
+                    return hex.count == 1 ? "0\(hex)" : hex
+                }
+                .joined(separator: ":")
+        }
+        updateManualCount()
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -144,6 +165,50 @@ final class PreferencesWindowController: NSWindowController {
         intervalRow.addSubview(intervalPopUp)
         allRows.append(intervalRow)
 
+        // Format hint (conditional — shown for File and URL)
+        formatHintRow = makeRow()
+        let hintLabel = NSTextField(wrappingLabelWithString:
+            "Accepted formats: JSON with \"apName\" and \"bssid\" fields, or CSV with apName,bssid columns. Ruckus Data Studio exports are supported.")
+        hintLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        hintLabel.textColor = .secondaryLabelColor
+        hintLabel.isSelectable = false
+        formatHintRow.addSubview(hintLabel)
+        allRows.append(formatHintRow)
+
+        // ── Section: Manual Entry ────────────────────────────────────
+
+        allRows.append(makeSectionHeader("Manual Entry"))
+
+        // AP Name row
+        manualApNameRow = makeRow()
+        let apNameLabel = makeLabel("AP Name:")
+        manualApNameField = NSTextField(frame: .zero)
+        manualApNameField.placeholderString = "e.g. Lobby North"
+        manualApNameRow.addSubview(apNameLabel)
+        manualApNameRow.addSubview(manualApNameField)
+        allRows.append(manualApNameRow)
+
+        // BSSID row
+        manualBssidRow = makeRow()
+        let bssidLabel = makeLabel("BSSID:")
+        manualBssidField = NSTextField(frame: .zero)
+        manualBssidField.placeholderString = "e.g. 00:33:58:A9:B5:F0"
+        manualBssidRow.addSubview(bssidLabel)
+        manualBssidRow.addSubview(manualBssidField)
+        allRows.append(manualBssidRow)
+
+        // Add button + count row
+        manualButtonRow = makeRow()
+        addEntryButton = NSButton(title: "Add", target: self, action: #selector(addManualEntry(_:)))
+        addEntryButton.bezelStyle = .rounded
+        addEntryButton.sizeToFit()
+        manualCountLabel = NSTextField(labelWithString: "")
+        manualCountLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        manualCountLabel.textColor = .secondaryLabelColor
+        manualButtonRow.addSubview(manualCountLabel)
+        manualButtonRow.addSubview(addEntryButton)
+        allRows.append(manualButtonRow)
+
         // ── Section: Display ───────────────────────────────────────
 
         allRows.append(makeSectionHeader("Display"))
@@ -210,9 +275,20 @@ final class PreferencesWindowController: NSWindowController {
                 continue
             }
 
-            row.frame = NSRect(x: sideMargin, y: y - rowHeight, width: usableWidth, height: rowHeight)
-            layoutSubviewsOfRow(row, width: usableWidth)
-            y -= (rowHeight + rowSpacing)
+            let currentRowHeight: CGFloat
+            if row === formatHintRow {
+                // Wrapping hint label needs more height
+                currentRowHeight = 48
+                row.frame = NSRect(x: sideMargin, y: y - currentRowHeight, width: usableWidth, height: currentRowHeight)
+                if let label = row.subviews.first as? NSTextField {
+                    label.frame = NSRect(x: 0, y: 0, width: usableWidth, height: currentRowHeight)
+                }
+            } else {
+                currentRowHeight = rowHeight
+                row.frame = NSRect(x: sideMargin, y: y - currentRowHeight, width: usableWidth, height: currentRowHeight)
+                layoutSubviewsOfRow(row, width: usableWidth)
+            }
+            y -= (currentRowHeight + rowSpacing)
         }
     }
 
@@ -254,6 +330,14 @@ final class PreferencesWindowController: NSWindowController {
             label.frame = NSRect(x: 0, y: 0, width: labelWidth, height: h)
             button.frame = NSRect(x: width - btnW, y: 0, width: btnW, height: h)
             pathLabel.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - btnW - 12, height: h)
+            return
+        }
+
+        // Manual entry button row: count label + add button
+        if row === manualButtonRow {
+            let btnW = addEntryButton.frame.width
+            addEntryButton.frame = NSRect(x: labelWidth + 4, y: 0, width: btnW, height: h)
+            manualCountLabel.frame = NSRect(x: labelWidth + btnW + 12, y: 0, width: width - labelWidth - btnW - 16, height: h)
             return
         }
 
@@ -359,6 +443,9 @@ final class PreferencesWindowController: NSWindowController {
             let status = SMAppService.mainApp.status
             launchCheckbox.state = (status == .enabled) ? .on : .off
         }
+
+        // Manual entry count
+        updateManualCount()
     }
 
     // MARK: - Conditional Visibility
@@ -366,9 +453,10 @@ final class PreferencesWindowController: NSWindowController {
     private func updateConditionalVisibility(animated: Bool) {
         let source = selectedSourceValue()
 
-        fileRow.isHidden     = (source != "file")
-        urlRow.isHidden      = (source != "url")
-        intervalRow.isHidden = (source != "url")
+        fileRow.isHidden      = (source != "file")
+        urlRow.isHidden       = (source != "url")
+        intervalRow.isHidden  = (source != "url")
+        formatHintRow.isHidden = (source == "bundled")
 
         layoutRows()
     }
@@ -459,6 +547,49 @@ final class PreferencesWindowController: NSWindowController {
         let isOn = sender.state == .on
         UserDefaults.standard.set(isOn, forKey: PrefKey.showBand)
         NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
+    }
+
+    @objc private func addManualEntry(_ sender: NSButton) {
+        let apName = manualApNameField.stringValue.trimmingCharacters(in: .whitespaces)
+        let bssid = manualBssidField.stringValue.trimmingCharacters(in: .whitespaces)
+
+        guard !apName.isEmpty, !bssid.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "Missing Information"
+            alert.informativeText = "Please enter both an AP name and a BSSID."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        // Basic BSSID format validation (should contain colons)
+        guard bssid.contains(":") else {
+            let alert = NSAlert()
+            alert.messageText = "Invalid BSSID"
+            alert.informativeText = "BSSID should be in the format XX:XX:XX:XX:XX:XX (e.g. 00:33:58:A9:B5:F0)."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        BSSIDMapping.shared.addManualEntry(apName: apName, bssid: bssid)
+
+        manualApNameField.stringValue = ""
+        manualBssidField.stringValue = ""
+        updateManualCount()
+
+        NotificationCenter.default.post(name: Notification.Name("MappingSourceChanged"), object: nil)
+    }
+
+    private func updateManualCount() {
+        let count = BSSIDMapping.shared.manualEntries().count
+        if count == 0 {
+            manualCountLabel.stringValue = ""
+        } else {
+            manualCountLabel.stringValue = "\(count) manual entr\(count == 1 ? "y" : "ies") saved"
+        }
     }
 
     @objc private func launchAtLoginChanged(_ sender: NSButton) {

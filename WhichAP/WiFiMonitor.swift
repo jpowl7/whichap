@@ -120,7 +120,7 @@ protocol WiFiMonitorDelegate: AnyObject {
 
 // MARK: - WiFiMonitor
 
-final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
+final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
 
     // MARK: Polling intervals
 
@@ -161,11 +161,20 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
 
     // MARK: Lifecycle
 
+    private let wifiClient = CWWiFiClient.shared()
+
     override init() {
         super.init()
         connectionHistory = ConnectionHistoryStore.shared.load()
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
+
+        // Monitor Wi-Fi events so we detect reconnects after toggles
+        wifiClient.delegate = self
+        try? wifiClient.startMonitoringEvent(with: .ssidDidChange)
+        try? wifiClient.startMonitoringEvent(with: .linkDidChange)
+        try? wifiClient.startMonitoringEvent(with: .powerDidChange)
+
         startPolling(interval: PollInterval.disconnected)
     }
 
@@ -179,6 +188,26 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate {
         let status = manager.authorizationStatus
         locationAuthorized = (status == .authorizedAlways || status == .authorized)
         poll()
+    }
+
+    // MARK: CWEventDelegate
+
+    func ssidDidChangeForWiFiInterface(withName interfaceName: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.poll()
+        }
+    }
+
+    func linkDidChangeForWiFiInterface(withName interfaceName: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.poll()
+        }
+    }
+
+    func powerStateDidChangeForWiFiInterface(withName interfaceName: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.poll()
+        }
     }
 
     // MARK: Polling

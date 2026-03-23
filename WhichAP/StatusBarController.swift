@@ -1,4 +1,5 @@
 import Cocoa
+import CoreWLAN
 
 final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
@@ -27,6 +28,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private let txRateItem = NSMenuItem()
     private let ipItem = NSMenuItem()
     private let connectedTimeItem = NSMenuItem()
+    private let restartWifiItem = NSMenuItem()
     private let disconnectedItem = NSMenuItem()
 
     private let sep1 = NSMenuItem.separator()
@@ -173,6 +175,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             removeStackView()
             button.title = "No Wi-Fi"
             button.appearsDisabled = true
+            // Clear cached state so reconnect triggers a full update
+            lastMenuBarTop = nil
+            lastMenuBarBottom = nil
+            lastMenuBarPoor = nil
             return
         }
 
@@ -278,10 +284,41 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
     // MARK: - Menu Structure (built once)
 
+    private let copyHintItem = NSMenuItem()
+
     private func buildMenuStructure() {
         menu.addItem(apNameItem)
+
+        restartWifiItem.title = "Restart Wi-Fi"
+        restartWifiItem.action = #selector(restartWifi)
+        restartWifiItem.target = self
+        restartWifiItem.keyEquivalent = "r"
+        menu.addItem(restartWifiItem)
+
         menu.addItem(locationHintItem)
+
+        // Copy hint
+        copyHintItem.attributedTitle = NSAttributedString(
+            string: "Click any item to copy",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+        )
+        menu.addItem(copyHintItem)
+
         menu.addItem(sep1)
+
+        // Make all info items clickable to copy
+        let copyableItems = [ssidItem, securityItem, bssidItem, signalItem, noiseItem,
+                             snrItem, bandItem, modeItem, txRateItem, ipItem, connectedTimeItem]
+        for item in copyableItems {
+            item.target = self
+            item.action = #selector(copyItemValue(_:))
+        }
+        apNameItem.target = self
+        apNameItem.action = #selector(copyItemValue(_:))
+
         menu.addItem(ssidItem)
         menu.addItem(securityItem)
         menu.addItem(bssidItem)
@@ -300,7 +337,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
         menu.addItem(sep4)
 
-        copyItem.title = "Copy Info to Clipboard"
+        copyItem.title = "Copy All to Clipboard"
         copyItem.action = #selector(copyToClipboard)
         copyItem.target = self
         copyItem.keyEquivalent = "c"
@@ -310,6 +347,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         let historyItem = NSMenuItem(title: "Connection History\u{2026}", action: #selector(showHistory), keyEquivalent: "h")
         historyItem.target = self
         menu.addItem(historyItem)
+
+        let wifiSettingsItem = NSMenuItem(title: "Wi-Fi Settings\u{2026}", action: #selector(openWifiSettings), keyEquivalent: "w")
+        wifiSettingsItem.target = self
+        menu.addItem(wifiSettingsItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -343,7 +384,9 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             menuIsConnected = isConnected
 
             apNameItem.isHidden = !isConnected
+            restartWifiItem.isHidden = !isConnected
             locationHintItem.isHidden = true
+            copyHintItem.isHidden = !isConnected
             sep1.isHidden = !isConnected
             ssidItem.isHidden = !isConnected
             securityItem.isHidden = !isConnected
@@ -381,8 +424,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         }
         if apDisplayName != lastApDisplayName {
             lastApDisplayName = apDisplayName
+            let apTitle = "AP Name: \(apDisplayName)"
+            apNameItem.title = apTitle
             apNameItem.attributedTitle = NSAttributedString(
-                string: apDisplayName,
+                string: apTitle,
                 attributes: [.font: NSFont.boldSystemFont(ofSize: 14)]
             )
         }
@@ -451,6 +496,19 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
     // MARK: - Menu Actions
 
+    @objc private func copyItemValue(_ sender: NSMenuItem) {
+        // Extract the value after the label prefix (e.g. "SSID: foo" → "foo")
+        let text = sender.title
+        let value: String
+        if let colonRange = text.range(of: ": ") {
+            value = String(text[colonRange.upperBound...])
+        } else {
+            value = text
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
     @objc private func copyToClipboard() {
         guard let info = latestInfo, let ssid = info.ssid else { return }
 
@@ -508,9 +566,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–"
 
-        let alert = NSAlert()
-        alert.messageText = "WhichAP"
-        alert.informativeText = """
+        let text = """
         Version \(version) (Build \(build))
 
         A lightweight menu bar utility that shows which SSID and access point you are connected to (you must provide your mapping of BSSIDs to AP names).
@@ -518,12 +574,33 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         Clicking on the AP name provides a quick look at details of the connection, connection history, and ability to copy this info to include in a support ticket.
 
         App by Jason Powell
+        venmo: @jasonpowell7 if you'd like to buy me a beverage ;-)
         """
+
+        let alert = NSAlert()
+        alert.messageText = "WhichAP"
+        alert.informativeText = text
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
 
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    @objc private func restartWifi() {
+        guard let interface = CWWiFiClient.shared().interface() else { return }
+        do {
+            try interface.setPower(false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                try? interface.setPower(true)
+            }
+        } catch {
+            // Silently fail
+        }
+    }
+
+    @objc private func openWifiSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.wifi-settings")!)
     }
 
     @objc private func quitApp() {

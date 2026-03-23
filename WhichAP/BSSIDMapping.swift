@@ -21,10 +21,13 @@ final class BSSIDMapping {
         return mapping.isEmpty
     }
 
+    private static let manualEntriesKey = "manualMappingEntries"
+
     // MARK: Lifecycle
 
     private init() {
         loadBundledMapping()
+        loadManualEntries()
     }
 
     // MARK: Loading — bundled JSON
@@ -133,5 +136,45 @@ final class BSSIDMapping {
                 return hex.count == 1 ? "0\(hex)" : hex
             }
             .joined(separator: ":")
+    }
+
+    // MARK: Manual entries
+
+    /// Adds or updates a single BSSID → AP name mapping and persists to UserDefaults.
+    func addManualEntry(apName: String, bssid: String) {
+        let normalized = normalizeBSSID(bssid)
+        mapping[normalized] = apName
+
+        var entries = manualEntries()
+        // Replace existing entry for this BSSID, or append new
+        if let index = entries.firstIndex(where: { $0["bssid"] == normalized }) {
+            entries[index] = ["apName": apName, "bssid": normalized]
+        } else {
+            entries.append(["apName": apName, "bssid": normalized])
+        }
+        UserDefaults.standard.set(entries, forKey: Self.manualEntriesKey)
+    }
+
+    /// Removes a manual entry by BSSID and persists to UserDefaults.
+    func removeManualEntry(bssid: String) {
+        let normalized = normalizeBSSID(bssid)
+        mapping.removeValue(forKey: normalized)
+
+        var entries = manualEntries()
+        entries.removeAll { ($0["bssid"] as? String) == normalized }
+        UserDefaults.standard.set(entries, forKey: Self.manualEntriesKey)
+    }
+
+    /// Returns all manually added entries.
+    func manualEntries() -> [[String: String]] {
+        return UserDefaults.standard.array(forKey: Self.manualEntriesKey) as? [[String: String]] ?? []
+    }
+
+    /// Loads manual entries from UserDefaults into the mapping dictionary.
+    private func loadManualEntries() {
+        for entry in manualEntries() {
+            guard let apName = entry["apName"], let bssid = entry["bssid"] else { continue }
+            mapping[bssid] = apName  // Already normalized when saved
+        }
     }
 }
