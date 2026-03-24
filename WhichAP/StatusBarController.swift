@@ -7,6 +7,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private let wifiMonitor = WiFiMonitor()
     private var preferencesWindowController: PreferencesWindowController?
     private var historyWindowController: ConnectionHistoryWindowController?
+    private var helpWindowController: HelpWindowController?
 
     private var latestInfo: WiFiConnectionInfo?
     private var menuUpdateTimer: Timer?
@@ -358,6 +359,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         prefsItem.target = self
         menu.addItem(prefsItem)
 
+        let helpItem = NSMenuItem(title: "Help", action: #selector(showHelp), keyEquivalent: "?")
+        helpItem.target = self
+        menu.addItem(helpItem)
+
         let aboutItem = NSMenuItem(title: "About WhichAP", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
@@ -562,6 +567,14 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         preferencesWindowController?.showWindow(nil)
     }
 
+    @objc private func showHelp() {
+        if helpWindowController == nil {
+            helpWindowController = HelpWindowController()
+        }
+        helpWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func showAbout() {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–"
@@ -573,7 +586,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
         Clicking on the AP name provides a quick look at details of the connection, connection history, and ability to copy this info to include in a support ticket.
 
-        App by Jason Powell
+        \u{00A9} 2026 Jason Powell. All rights reserved.
         venmo: @jasonpowell7 if you'd like to buy me a beverage ;-)
         """
 

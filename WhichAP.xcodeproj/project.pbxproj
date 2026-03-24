@@ -15,6 +15,7 @@
 		A1B2C3D4E5F60001000A0006 /* BSSIDMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A0009 /* BSSIDMapping.swift */; };
 		A1B2C3D4E5F60001000A0007 /* default-mapping.json in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A000A /* default-mapping.json */; };
 		A1B2C3D4E5F60001000A0008 /* PreferencesWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A000B /* PreferencesWindow.swift */; };
+		97F62C3E35C52D74834ACF7E /* HelpWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7411401C728EF53F6A7FA255 /* HelpWindow.swift */; };
 		CB8B711AC617B17332A8DDBD /* MappingEditorWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C47C3FB00A4AC0FC3E8ECD0 /* MappingEditorWindow.swift */; };
 		AA89E7300BD02824136DBF3F /* ConnectionHistoryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A241E247760A8CD62AE6A955 /* ConnectionHistoryWindow.swift */; };
 		A1B2C3D4E5F60001000A0009 /* MappingUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002000A000C /* MappingUpdater.swift */; };
@@ -35,6 +36,7 @@
 		A1B2C3D4E5F60002000A0009 /* BSSIDMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BSSIDMapping.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002000A000A /* default-mapping.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "default-mapping.json"; path = "Resources/default-mapping.json"; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F60002000A000B /* PreferencesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesWindow.swift; sourceTree = "<group>"; };
+		7411401C728EF53F6A7FA255 /* HelpWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpWindow.swift; sourceTree = "<group>"; };
 		0C47C3FB00A4AC0FC3E8ECD0 /* MappingEditorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MappingEditorWindow.swift; sourceTree = "<group>"; };
 		A241E247760A8CD62AE6A955 /* ConnectionHistoryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionHistoryWindow.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002000A000C /* MappingUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MappingUpdater.swift; sourceTree = "<group>"; };
@@ -76,6 +78,7 @@
 				A1B2C3D4E5F60002000A0003 /* WiFiMonitor.swift */,
 				A1B2C3D4E5F60002000A0009 /* BSSIDMapping.swift */,
 				A1B2C3D4E5F60002000A000B /* PreferencesWindow.swift */,
+				7411401C728EF53F6A7FA255 /* HelpWindow.swift */,
 				0C47C3FB00A4AC0FC3E8ECD0 /* MappingEditorWindow.swift */,
 				A241E247760A8CD62AE6A955 /* ConnectionHistoryWindow.swift */,
 				A1B2C3D4E5F60002000A000C /* MappingUpdater.swift */,
@@ -188,6 +191,7 @@
 				A1B2C3D4E5F60001000A0003 /* WiFiMonitor.swift in Sources */,
 				A1B2C3D4E5F60001000A0006 /* BSSIDMapping.swift in Sources */,
 				A1B2C3D4E5F60001000A0008 /* PreferencesWindow.swift in Sources */,
+				97F62C3E35C52D74834ACF7E /* HelpWindow.swift in Sources */,
 				CB8B711AC617B17332A8DDBD /* MappingEditorWindow.swift in Sources */,
 				AA89E7300BD02824136DBF3F /* ConnectionHistoryWindow.swift in Sources */,
 				A1B2C3D4E5F60001000A0009 /* MappingUpdater.swift in Sources */,
