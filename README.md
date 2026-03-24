@@ -99,4 +99,4 @@ WhichAP supports managed preferences via the `com.grangerchurch.whichap` domain.
 
 ## License
 
-Built by Jason Powell.
+Copyright 2026 Jason Powell. All rights reserved.
