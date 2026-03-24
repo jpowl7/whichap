@@ -27,10 +27,11 @@ final class PreferencesWindowController: NSWindowController {
     private var intervalPopUp:    NSPopUpButton!
     private var maxLengthStepper: NSStepper!
     private var maxLengthLabel:   NSTextField!
-    private var showBandCheckbox: NSButton!
+    // showBand removed — band is no longer shown in menu bar
     private var launchCheckbox:   NSButton!
 
     // Manual entry controls
+    private var mappingEditorController: MappingEditorWindowController?
     private var manualApNameField:  NSTextField!
     private var manualBssidField:   NSTextField!
     private var addEntryButton:     NSButton!
@@ -209,6 +210,14 @@ final class PreferencesWindowController: NSWindowController {
         manualButtonRow.addSubview(addEntryButton)
         allRows.append(manualButtonRow)
 
+        // View & Edit Mappings button row
+        let editMappingsRow = makeRow()
+        let editMappingsButton = NSButton(title: "View & Edit Mappings\u{2026}", target: self, action: #selector(showMappingEditor))
+        editMappingsButton.bezelStyle = .rounded
+        editMappingsButton.sizeToFit()
+        editMappingsRow.addSubview(editMappingsButton)
+        allRows.append(editMappingsRow)
+
         // ── Section: Display ───────────────────────────────────────
 
         allRows.append(makeSectionHeader("Display"))
@@ -230,12 +239,6 @@ final class PreferencesWindowController: NSWindowController {
         maxLenRow.addSubview(maxLengthLabel)
         maxLenRow.addSubview(maxLengthStepper)
         allRows.append(maxLenRow)
-
-        // Show Band checkbox row
-        let bandRow = makeRow()
-        showBandCheckbox = NSButton(checkboxWithTitle: "Show band info in menu bar", target: self, action: #selector(showBandChanged(_:)))
-        bandRow.addSubview(showBandCheckbox)
-        allRows.append(bandRow)
 
         // ── Section: General ───────────────────────────────────────
 
@@ -303,8 +306,14 @@ final class PreferencesWindowController: NSWindowController {
 
         // Checkbox-only rows (Show Band, Launch at Login)
         if subviews.count == 1, let checkbox = subviews.first as? NSButton,
-           checkbox.bezelStyle == .regularSquare || checkbox == showBandCheckbox || checkbox == launchCheckbox {
+           checkbox.bezelStyle == .regularSquare || checkbox == launchCheckbox {
             checkbox.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
+            return
+        }
+
+        // Single button row (View & Edit Mappings)
+        if subviews.count == 1, let button = subviews.first as? NSButton, button.bezelStyle == .rounded {
+            button.frame = NSRect(x: labelWidth + 4, y: 0, width: button.frame.width, height: h)
             return
         }
 
@@ -434,10 +443,6 @@ final class PreferencesWindowController: NSWindowController {
         maxLengthStepper.integerValue = clampedMaxLen
         maxLengthLabel.stringValue = "\(clampedMaxLen)"
 
-        // Show band
-        let showBand = defaults.bool(forKey: PrefKey.showBand)
-        showBandCheckbox.state = showBand ? .on : .off
-
         // Launch at login — read from SMAppService
         if #available(macOS 13.0, *) {
             let status = SMAppService.mainApp.status
@@ -543,10 +548,18 @@ final class PreferencesWindowController: NSWindowController {
         NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
     }
 
-    @objc private func showBandChanged(_ sender: NSButton) {
-        let isOn = sender.state == .on
-        UserDefaults.standard.set(isOn, forKey: PrefKey.showBand)
-        NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
+    @objc private func showMappingEditor() {
+        if mappingEditorController == nil {
+            let controller = MappingEditorWindowController()
+            controller.onChanged = { [weak self] in
+                self?.updateManualCount()
+                NotificationCenter.default.post(name: Notification.Name("MappingSourceChanged"), object: nil)
+            }
+            mappingEditorController = controller
+        }
+        mappingEditorController?.reload()
+        mappingEditorController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func addManualEntry(_ sender: NSButton) {

@@ -170,6 +170,13 @@ final class BSSIDMapping {
         return UserDefaults.standard.array(forKey: Self.manualEntriesKey) as? [[String: String]] ?? []
     }
 
+    /// Returns all mappings as (apName, bssid, isManual) tuples, sorted by AP name.
+    func allEntries() -> [(apName: String, bssid: String, isManual: Bool)] {
+        let manualBSSIDs = Set(manualEntries().compactMap { $0["bssid"] })
+        return mapping.map { (apName: $0.value, bssid: $0.key, isManual: manualBSSIDs.contains($0.key)) }
+            .sorted { $0.apName.localizedCaseInsensitiveCompare($1.apName) == .orderedAscending }
+    }
+
     /// Loads manual entries from UserDefaults into the mapping dictionary.
     private func loadManualEntries() {
         for entry in manualEntries() {
