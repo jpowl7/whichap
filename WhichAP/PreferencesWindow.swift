@@ -500,12 +500,10 @@ final class PreferencesWindowController: NSWindowController {
         ]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
+        panel.canChooseFiles = true
 
-        guard let window = self.window else { return }
-
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
-            self?.handleSelectedFile(url)
+        if panel.runModal() == .OK, let url = panel.url {
+            handleSelectedFile(url)
         }
     }
 
