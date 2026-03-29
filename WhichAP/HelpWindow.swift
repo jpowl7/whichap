@@ -58,6 +58,8 @@ final class HelpWindowController: NSWindowController {
         • Click any info item to copy its value to the clipboard
         • "Copy All to Clipboard" copies everything formatted for a support ticket
         • "Restart Wi-Fi" toggles your Wi-Fi off and back on
+        • "Wi-Fi Settings" opens macOS Wi-Fi settings
+        • "Mac Uptime" shows how long since your last restart
         • "Connection History" shows a log of every AP you've connected to
 
         Location Services
