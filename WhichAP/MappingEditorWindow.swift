@@ -3,11 +3,11 @@ import Cocoa
 final class MappingEditorWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
 
     private var tableView: NSTableView!
-    private var entries: [(apName: String, bssid: String, isManual: Bool)] = []
+    private var entries: [(apName: String, bssid: String, source: BSSIDMapping.Source)] = []
     private var removeButton: NSButton!
     private var countLabel: NSTextField?
     private var searchField: NSSearchField!
-    private var filteredEntries: [(apName: String, bssid: String, isManual: Bool)] = []
+    private var filteredEntries: [(apName: String, bssid: String, source: BSSIDMapping.Source)] = []
     var onChanged: (() -> Void)?
 
     convenience init() {
@@ -130,17 +130,26 @@ final class MappingEditorWindowController: NSWindowController, NSTableViewDataSo
     }
 
     private func updateCount() {
-        let manualCount = entries.filter { $0.isManual }.count
+        let manualCount = entries.filter { $0.source == .manual }.count
+        let fileCount = entries.filter { $0.source == .file }.count
         let totalCount = entries.count
-        countLabel?.stringValue = "\(totalCount) mappings (\(manualCount) manual)"
+        countLabel?.stringValue = "\(totalCount) mappings (\(fileCount) file, \(manualCount) manual)"
     }
 
     private func updateRemoveButton() {
         let row = tableView.selectedRow
-        if row >= 0, row < filteredEntries.count, filteredEntries[row].isManual {
+        if row >= 0, row < filteredEntries.count, filteredEntries[row].source != .bundled {
             removeButton.isEnabled = true
         } else {
             removeButton.isEnabled = false
+        }
+    }
+
+    private func sourceLabel(_ source: BSSIDMapping.Source) -> String {
+        switch source {
+        case .bundled: return "Bundled"
+        case .file:    return "File"
+        case .manual:  return "Manual"
         }
     }
 
@@ -156,9 +165,9 @@ final class MappingEditorWindowController: NSWindowController, NSTableViewDataSo
 
     @objc private func removeSelected() {
         let row = tableView.selectedRow
-        guard row >= 0, row < filteredEntries.count, filteredEntries[row].isManual else { return }
+        guard row >= 0, row < filteredEntries.count, filteredEntries[row].source != .bundled else { return }
         let bssid = filteredEntries[row].bssid
-        BSSIDMapping.shared.removeManualEntry(bssid: bssid)
+        BSSIDMapping.shared.removeEntry(bssid: bssid)
         reload()
         onChanged?()
     }
@@ -179,11 +188,11 @@ final class MappingEditorWindowController: NSWindowController, NSTableViewDataSo
         switch columnId {
         case "apName": text = entry.apName
         case "bssid":  text = entry.bssid
-        case "source": text = entry.isManual ? "Manual" : "Bundled"
+        case "source": text = sourceLabel(entry.source)
         default:       text = ""
         }
 
-        let isEditable = entry.isManual && columnId != "source"
+        let isEditable = entry.source == .manual && columnId != "source"
 
         let cellId = NSUserInterfaceItemIdentifier("mapping_\(columnId)")
         let cell: NSTextField
@@ -199,7 +208,7 @@ final class MappingEditorWindowController: NSWindowController, NSTableViewDataSo
         }
         cell.stringValue = text
         cell.isEditable = isEditable
-        cell.textColor = entry.isManual ? .controlTextColor : .secondaryLabelColor
+        cell.textColor = entry.source == .bundled ? .secondaryLabelColor : .controlTextColor
 
         if isEditable {
             cell.target = self
@@ -216,7 +225,7 @@ final class MappingEditorWindowController: NSWindowController, NSTableViewDataSo
         let row = tableView.row(for: sender)
         let col = tableView.column(for: sender)
         guard row >= 0, row < filteredEntries.count, col >= 0 else { return }
-        guard filteredEntries[row].isManual else { return }
+        guard filteredEntries[row].source == .manual else { return }
 
         let columnId = tableView.tableColumns[col].identifier.rawValue
         let oldEntry = filteredEntries[row]

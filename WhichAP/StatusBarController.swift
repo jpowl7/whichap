@@ -29,6 +29,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private let txRateItem = NSMenuItem()
     private let ipItem = NSMenuItem()
     private let connectedTimeItem = NSMenuItem()
+    private let uptimeItem = NSMenuItem()
     private let restartWifiItem = NSMenuItem()
     private let disconnectedItem = NSMenuItem()
 
@@ -99,6 +100,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     @objc private func menuDidOpen() {
         menuUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.updateConnectedTime()
+            self?.updateUptime()
         }
     }
 
@@ -115,6 +117,13 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         connectedTimeItem.isHidden = false
         let elapsed = Int(Date().timeIntervalSince(since))
         connectedTimeItem.title = "Connected: \(formatDuration(elapsed))"
+
+        updateUptime()
+    }
+
+    private func updateUptime() {
+        let seconds = Int(ProcessInfo.processInfo.systemUptime)
+        uptimeItem.title = "Mac Uptime: \(formatUptime(seconds))"
     }
 
     // MARK: - Settings Change Handlers
@@ -296,6 +305,12 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         restartWifiItem.keyEquivalent = "r"
         menu.addItem(restartWifiItem)
 
+        let wifiSettingsItem = NSMenuItem(title: "Wi-Fi Settings\u{2026}", action: #selector(openWifiSettings), keyEquivalent: "w")
+        wifiSettingsItem.target = self
+        menu.addItem(wifiSettingsItem)
+
+        menu.addItem(uptimeItem)
+
         menu.addItem(locationHintItem)
 
         // Copy hint
@@ -312,7 +327,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
         // Make all info items clickable to copy
         let copyableItems = [ssidItem, securityItem, bssidItem, signalItem, noiseItem,
-                             snrItem, bandItem, modeItem, txRateItem, ipItem, connectedTimeItem]
+                             snrItem, bandItem, modeItem, txRateItem, ipItem, connectedTimeItem, uptimeItem]
         for item in copyableItems {
             item.target = self
             item.action = #selector(copyItemValue(_:))
@@ -348,10 +363,6 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         let historyItem = NSMenuItem(title: "Connection History\u{2026}", action: #selector(showHistory), keyEquivalent: "h")
         historyItem.target = self
         menu.addItem(historyItem)
-
-        let wifiSettingsItem = NSMenuItem(title: "Wi-Fi Settings\u{2026}", action: #selector(openWifiSettings), keyEquivalent: "w")
-        wifiSettingsItem.target = self
-        menu.addItem(wifiSettingsItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -412,6 +423,8 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             copyItem.isHidden = !isConnected
             sep5.isHidden = !isConnected
         }
+
+        updateUptime()
 
         guard let info, let ssid = info.ssid else {
             disconnectedItem.title = "Not connected to Wi-Fi"
@@ -499,6 +512,19 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         return "\(hours)h \(remainingMinutes)m"
     }
 
+    private func formatUptime(_ totalSeconds: Int) -> String {
+        let days = totalSeconds / 86400
+        let hours = (totalSeconds % 86400) / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        if days > 0 {
+            return "\(days)d \(hours)h \(minutes)m"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+
     // MARK: - Menu Actions
 
     @objc private func copyItemValue(_ sender: NSMenuItem) {
@@ -527,6 +553,9 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         let txFormatted = formatTxRate(info.transmitRate)
         let quality = info.signalQuality.rawValue
 
+        let uptimeSeconds = Int(ProcessInfo.processInfo.systemUptime)
+        let uptimeFormatted = formatUptime(uptimeSeconds)
+
         let text = """
         Wi-Fi Connection Info
         ─────────────────────
@@ -541,6 +570,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         Mode:      \(info.phyMode)
         Tx Rate:   \(txFormatted) Mbps
         IP:        \(info.ipAddress ?? "Unavailable")
+        Mac Uptime: \(uptimeFormatted)
         """
 
         NSPasteboard.general.clearContents()
