@@ -10,11 +10,12 @@ Instead of a raw BSSID (MAC address), WhichAP displays a friendly AP name like `
 - **Detailed connection info dropdown** — signal strength, noise, SNR, band, channel, PHY mode, Tx rate, IP address, security type
 - **Signal quality warning** — menu bar and dropdown text turns red when signal is Poor or Bad
 - **Connection timer** — shows how long you've been on the current AP (live-updating)
+- **Mac uptime** — shows system uptime in the dropdown (days, hours, minutes)
 - **Connection history** — logs every AP hop with timestamp in a searchable table. Persists across restarts.
 - **Click to copy** — click any item in the dropdown to copy its value. "Copy All" formats everything for a support ticket.
 - **Restart Wi-Fi** — one-click Wi-Fi toggle from the dropdown, auto-recovers
 - **Wi-Fi Settings** — quick link to macOS Wi-Fi settings
-- **Mapping editor** — view all BSSID mappings (bundled + manual) with search/filter. Edit or remove manual entries inline.
+- **Mapping editor** — view all BSSID mappings (bundled, file, manual) with search/filter. Edit or remove manual/file entries inline.
 - **Manual BSSID entry** — add AP names one at a time in Preferences, auto-fills current BSSID
 - **Multiple mapping sources** — bundled JSON, local file import (JSON/CSV), or remote URL with auto-refresh (hourly/daily/weekly)
 - **Wi-Fi event monitoring** — instant detection of Wi-Fi state changes via CWEventDelegate (no polling delay)
