@@ -7,7 +7,9 @@ Instead of a raw BSSID (MAC address), WhichAP displays a friendly AP name like `
 ## Features
 
 - **Two-line menu bar display** — SSID on top, AP name below
-- **Detailed connection info dropdown** — signal strength, noise, SNR, band, channel, PHY mode, Tx rate, IP address, security type
+- **Geek mode** — optional display showing SSID:AP Name on top, signal%|band|channel on bottom
+- **AP manufacturer lookup** — identifies the AP vendor via the IEEE OUI database (cached in memory)
+- **Detailed connection info dropdown** — signal strength, noise, SNR, band, channel, PHY mode, Tx rate, IP address, security type, manufacturer
 - **Signal quality warning** — menu bar and dropdown text turns red when signal is Poor or Bad
 - **Connection timer** — shows how long you've been on the current AP (live-updating)
 - **Mac uptime** — shows system uptime in the dropdown (days, hours, minutes)
@@ -18,6 +20,7 @@ Instead of a raw BSSID (MAC address), WhichAP displays a friendly AP name like `
 - **Mapping editor** — view all BSSID mappings (bundled, file, manual) with search/filter. Edit or remove manual/file entries inline.
 - **Manual BSSID entry** — add AP names one at a time in Preferences, auto-fills current BSSID
 - **Multiple mapping sources** — bundled JSON, local file import (JSON/CSV), or remote URL with auto-refresh (hourly/daily/weekly)
+- **Truncate AP name at colon** — optional preference to hide technical suffix from AP names
 - **Wi-Fi event monitoring** — instant detection of Wi-Fi state changes via CWEventDelegate (no polling delay)
 - **Adaptive polling** — 2s when roaming, 10s when stable, 5s when disconnected
 - **Launch at login** — via macOS Login Items (SMAppService)
@@ -31,7 +34,7 @@ Instead of a raw BSSID (MAC address), WhichAP displays a friendly AP name like `
 3. Launch from Applications or Spotlight
 4. Click **Allow** on the Location Services prompt (required for BSSID access)
 
-Note: If the app hasn't been notarized with Apple, you may need to right-click > Open > click Open to bypass Gatekeeper on first launch.
+The app is signed with a Developer ID certificate and notarized with Apple — no Gatekeeper warnings.
 
 ### From source
 ```bash
@@ -72,7 +75,7 @@ TechOps - AC43,00:33:58:A9:EC:02
 - **Preferences > Source: File** — import a local .json or .csv file
 - **Preferences > Source: URL** — point to a hosted mapping file (e.g., on Vercel) for automatic updates
 - **Preferences > Manual Entry** — type in AP name and BSSID one at a time (current BSSID auto-fills)
-- **Preferences > View & Edit Mappings** — browse all mappings (bundled + manual) with search, edit manual entries inline, remove manual entries
+- **Preferences > View & Edit Mappings** — browse all mappings (bundled, file, manual) with search, edit or remove entries inline
 
 ## Location Services
 
@@ -92,6 +95,9 @@ WhichAP supports managed preferences via the `com.grangerchurch.whichap` domain.
 | `mappingURL` | String | HTTPS URL to mapping JSON |
 | `fetchInterval` | String | `hourly`, `daily`, `weekly` |
 | `launchAtLogin` | Boolean | `true` / `false` |
+| `geekMode` | Boolean | `true` / `false` |
+| `truncateAtColon` | Boolean | `true` / `false` |
+| `apNameMaxLength` | Integer | 5–50 (default 20) |
 
 ## Requirements
 
