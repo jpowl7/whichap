@@ -195,7 +195,7 @@ final class PreferencesWindowController: NSWindowController {
 
         // BSSID row
         manualBssidRow = makeRow()
-        let bssidLabel = makeLabel("BSSID:")
+        let bssidLabel = makeLabel("Your current BSSID:")
         manualBssidField = NSTextField(frame: .zero)
         manualBssidField.placeholderString = "e.g. 00:33:58:A9:B5:F0"
         manualBssidRow.addSubview(bssidLabel)
@@ -313,6 +313,8 @@ final class PreferencesWindowController: NSWindowController {
 
     private func layoutSubviewsOfRow(_ row: NSView, width: CGFloat) {
         let h = rowHeight
+        // Offset to vertically align plain label text with text inside bordered controls
+        let labelDrop: CGFloat = -4
 
         // Identify subviews by class to decide layout
         let subviews = row.subviews
@@ -338,10 +340,10 @@ final class PreferencesWindowController: NSWindowController {
             let label = subviews[0] as! NSTextField
             let valueLabel = subviews[1] as! NSTextField
             let stepper = subviews[2] as! NSStepper
-            label.frame = NSRect(x: 0, y: 2, width: labelWidth, height: h)
+            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
             let stepperW: CGFloat = stepper.frame.width
             let valueLabelW: CGFloat = 36
-            valueLabel.frame = NSRect(x: labelWidth + 4, y: 0, width: valueLabelW, height: h)
+            valueLabel.frame = NSRect(x: labelWidth + 4, y: labelDrop, width: valueLabelW, height: h)
             stepper.frame = NSRect(x: labelWidth + 4 + valueLabelW + 4, y: 2, width: stepperW, height: h - 4)
             return
         }
@@ -352,9 +354,9 @@ final class PreferencesWindowController: NSWindowController {
             let pathLabel = subviews[1] as! NSTextField
             let button = subviews[2] as! NSButton
             let btnW = button.frame.width
-            label.frame = NSRect(x: 0, y: 0, width: labelWidth, height: h)
+            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
             button.frame = NSRect(x: width - btnW, y: 0, width: btnW, height: h)
-            pathLabel.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - btnW - 12, height: h)
+            pathLabel.frame = NSRect(x: labelWidth + 4, y: labelDrop, width: width - labelWidth - btnW - 12, height: h)
             return
         }
 
@@ -369,16 +371,16 @@ final class PreferencesWindowController: NSWindowController {
         // PopUpButton row: label + popup
         if let popup = subviews.last as? NSPopUpButton {
             let label = subviews[0] as! NSTextField
-            label.frame = NSRect(x: 0, y: 0, width: labelWidth, height: h)
+            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
             popup.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
             return
         }
 
-        // Text field row (URL): label + text field
+        // Text field row (URL, AP Name, BSSID): label + text field
         if subviews.count == 2, subviews[1] is NSTextField, !(subviews[1] is NSSecureTextField) {
             let label = subviews[0] as! NSTextField
             let field = subviews[1] as! NSTextField
-            label.frame = NSRect(x: 0, y: 0, width: labelWidth, height: h)
+            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
             field.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
             return
         }
@@ -579,6 +581,7 @@ final class PreferencesWindowController: NSWindowController {
         }
         mappingEditorController?.reload()
         mappingEditorController?.showWindow(nil)
+        mappingEditorController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
