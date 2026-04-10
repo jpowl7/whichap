@@ -355,8 +355,10 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
 
     // MARK: AP display name
 
-    /// Returns only the friendly location portion of an AP name (before " : ").
+    /// Returns only the friendly location portion of an AP name (before " : ")
+    /// when the user has enabled truncation in preferences.
     static func displayName(from fullName: String) -> String {
+        guard UserDefaults.standard.bool(forKey: "truncateAtColon") else { return fullName }
         if let range = fullName.range(of: " : ") {
             return fullName[fullName.startIndex..<range.lowerBound]
                 .trimmingCharacters(in: .whitespaces)

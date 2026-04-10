@@ -11,6 +11,7 @@ private enum PrefKey {
     static let fetchInterval     = "fetchInterval"
     static let apNameMaxLength   = "apNameMaxLength"
     static let showBand          = "showBand"
+    static let truncateAtColon   = "truncateAtColon"
     static let launchAtLogin     = "launchAtLogin"
 }
 
@@ -28,6 +29,7 @@ final class PreferencesWindowController: NSWindowController {
     private var maxLengthStepper: NSStepper!
     private var maxLengthLabel:   NSTextField!
     // showBand removed — band is no longer shown in menu bar
+    private var truncateCheckbox: NSButton!
     private var launchCheckbox:   NSButton!
 
     // Manual entry controls
@@ -240,6 +242,12 @@ final class PreferencesWindowController: NSWindowController {
         maxLenRow.addSubview(maxLengthStepper)
         allRows.append(maxLenRow)
 
+        // Truncate at colon row
+        let truncateRow = makeRow()
+        truncateCheckbox = NSButton(checkboxWithTitle: "Truncate AP name at \":\"", target: self, action: #selector(truncateAtColonChanged(_:)))
+        truncateRow.addSubview(truncateCheckbox)
+        allRows.append(truncateRow)
+
         // ── Section: General ───────────────────────────────────────
 
         allRows.append(makeSectionHeader("General"))
@@ -306,7 +314,7 @@ final class PreferencesWindowController: NSWindowController {
 
         // Checkbox-only rows (Show Band, Launch at Login)
         if subviews.count == 1, let checkbox = subviews.first as? NSButton,
-           checkbox.bezelStyle == .regularSquare || checkbox == launchCheckbox {
+           checkbox.bezelStyle == .regularSquare || checkbox == launchCheckbox || checkbox == truncateCheckbox {
             checkbox.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
             return
         }
@@ -442,6 +450,9 @@ final class PreferencesWindowController: NSWindowController {
         let clampedMaxLen = max(5, min(50, maxLen == 0 ? 20 : maxLen))
         maxLengthStepper.integerValue = clampedMaxLen
         maxLengthLabel.stringValue = "\(clampedMaxLen)"
+
+        // Truncate at colon
+        truncateCheckbox.state = defaults.bool(forKey: PrefKey.truncateAtColon) ? .on : .off
 
         // Launch at login — read from SMAppService
         if #available(macOS 13.0, *) {
@@ -601,6 +612,11 @@ final class PreferencesWindowController: NSWindowController {
         } else {
             manualCountLabel.stringValue = "\(count) manual entr\(count == 1 ? "y" : "ies") saved"
         }
+    }
+
+    @objc private func truncateAtColonChanged(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state == .on, forKey: PrefKey.truncateAtColon)
+        NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
     }
 
     @objc private func launchAtLoginChanged(_ sender: NSButton) {
