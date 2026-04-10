@@ -21,6 +21,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private let ssidItem = NSMenuItem()
     private let securityItem = NSMenuItem()
     private let bssidItem = NSMenuItem()
+    private let manufacturerItem = NSMenuItem()
     private let signalItem = NSMenuItem()
     private let noiseItem = NSMenuItem()
     private let snrItem = NSMenuItem()
@@ -130,6 +131,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
     @objc private func displaySettingsChanged() {
         refreshCachedSettings()
+        // Clear cache so display mode changes take effect immediately
+        lastMenuBarTop = nil
+        lastMenuBarBottom = nil
+        lastMenuBarPoor = nil
         updateMenuBarText(with: latestInfo)
         updateMenu(with: latestInfo)
     }
@@ -159,6 +164,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         return UserDefaults.standard.bool(forKey: "showBand")
     }()
 
+    private var cachedGeekMode: Bool = {
+        return UserDefaults.standard.bool(forKey: "geekMode")
+    }()
+
     private func refreshCachedSettings() {
         let val = UserDefaults.standard.integer(forKey: "apNameMaxLength")
         cachedMaxNameLength = val > 0 ? val : 20
@@ -167,6 +176,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         } else {
             cachedShowBand = UserDefaults.standard.bool(forKey: "showBand")
         }
+        cachedGeekMode = UserDefaults.standard.bool(forKey: "geekMode")
     }
 
     // MARK: - Menu Bar Text (with change tracking)
@@ -195,15 +205,35 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
         button.appearsDisabled = false
 
-        let topLine = ssid
         let isPoorSignal = info.signalQuality == .poor || info.signalQuality == .bad
 
-        // Bottom line: AP name (if available)
+        let topLine: String
         let bottomLine: String?
-        if let bssid = info.bssid, let name = apName(forBSSID: bssid) {
-            bottomLine = truncatedName(name, limit: cachedMaxNameLength)
+
+        if cachedGeekMode {
+            // Geek mode: "SSID > AP Name" on top, "Signal%|Band|chN" on bottom
+            let apDisplayName: String?
+            if let bssid = info.bssid, let name = self.apName(forBSSID: bssid) {
+                apDisplayName = truncatedName(name, limit: cachedMaxNameLength)
+            } else {
+                apDisplayName = nil
+            }
+
+            if let apDisplayName {
+                topLine = "\(ssid)\u{2009}:\u{2009}\(apDisplayName)"
+            } else {
+                topLine = ssid
+            }
+            let compactBand = info.band.replacingOccurrences(of: " ", with: "")
+            bottomLine = "\(info.signalPercent)%|\(compactBand)|ch\(info.channelNumber)"
         } else {
-            bottomLine = nil
+            // Normal mode: SSID on top, AP name on bottom
+            topLine = ssid
+            if let bssid = info.bssid, let name = apName(forBSSID: bssid) {
+                bottomLine = truncatedName(name, limit: cachedMaxNameLength)
+            } else {
+                bottomLine = nil
+            }
         }
 
         // Skip update if nothing changed
@@ -327,7 +357,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         menu.addItem(sep1)
 
         // Make all info items clickable to copy
-        let copyableItems = [ssidItem, securityItem, bssidItem, signalItem, noiseItem,
+        let copyableItems = [ssidItem, securityItem, bssidItem, manufacturerItem, signalItem, noiseItem,
                              snrItem, bandItem, modeItem, txRateItem, ipItem, connectedTimeItem, uptimeItem]
         for item in copyableItems {
             item.target = self
@@ -339,6 +369,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         menu.addItem(ssidItem)
         menu.addItem(securityItem)
         menu.addItem(bssidItem)
+        menu.addItem(manufacturerItem)
         menu.addItem(sep2)
         menu.addItem(signalItem)
         menu.addItem(noiseItem)
@@ -408,6 +439,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             ssidItem.isHidden = !isConnected
             securityItem.isHidden = !isConnected
             bssidItem.isHidden = !isConnected
+            manufacturerItem.isHidden = !isConnected
             sep2.isHidden = !isConnected
             signalItem.isHidden = !isConnected
             noiseItem.isHidden = !isConnected
@@ -457,6 +489,17 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         ssidItem.title = "SSID: \(ssid)"
         securityItem.title = "Security: \(info.security)"
         bssidItem.title = "BSSID: \(info.bssid ?? "Unavailable")"
+
+        // Manufacturer (OUI lookup — async with cache)
+        if let bssid = info.bssid {
+            OUILookup.shared.manufacturer(forBSSID: bssid) { [weak self] mfr in
+                DispatchQueue.main.async {
+                    self?.manufacturerItem.title = "Manufacturer: \(mfr ?? "Unknown")"
+                }
+            }
+        } else {
+            manufacturerItem.title = "Manufacturer: Unknown"
+        }
 
         // Signal quality
         let quality = info.signalQuality.rawValue
@@ -564,6 +607,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         SSID:      \(ssid)
         Security:  \(info.security)
         BSSID:     \(info.bssid ?? "Unavailable")
+        Mfr:       \(manufacturerItem.title.replacingOccurrences(of: "Manufacturer: ", with: ""))
         Signal:    \(info.rssi) dBm (\(quality)) — \(info.signalPercent)%
         Noise:     \(info.noise) dBm — \(info.noisePercent)%
         SNR:       \(info.snr) dB

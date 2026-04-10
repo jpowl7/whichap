@@ -12,6 +12,7 @@ private enum PrefKey {
     static let apNameMaxLength   = "apNameMaxLength"
     static let showBand          = "showBand"
     static let truncateAtColon   = "truncateAtColon"
+    static let geekMode          = "geekMode"
     static let launchAtLogin     = "launchAtLogin"
 }
 
@@ -30,6 +31,7 @@ final class PreferencesWindowController: NSWindowController {
     private var maxLengthLabel:   NSTextField!
     // showBand removed — band is no longer shown in menu bar
     private var truncateCheckbox: NSButton!
+    private var geekModeCheckbox: NSButton!
     private var launchCheckbox:   NSButton!
 
     // Manual entry controls
@@ -60,18 +62,18 @@ final class PreferencesWindowController: NSWindowController {
     // MARK: Geometry constants
 
     private let windowWidth:  CGFloat = 420
-    private let windowHeight: CGFloat = 500
+    private let windowHeight: CGFloat = 574
     private let sideMargin:   CGFloat = 20
     private let rowHeight:    CGFloat = 26
     private let rowSpacing:   CGFloat = 8
     private let sectionGap:   CGFloat = 16
-    private let labelWidth:   CGFloat = 130
+    private let labelWidth:   CGFloat = 145
 
     // MARK: Lifecycle
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 574),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -248,6 +250,12 @@ final class PreferencesWindowController: NSWindowController {
         truncateRow.addSubview(truncateCheckbox)
         allRows.append(truncateRow)
 
+        // Geek mode row
+        let geekRow = makeRow()
+        geekModeCheckbox = NSButton(checkboxWithTitle: "Geek mode (signal, band, channel)", target: self, action: #selector(geekModeChanged(_:)))
+        geekRow.addSubview(geekModeCheckbox)
+        allRows.append(geekRow)
+
         // ── Section: General ───────────────────────────────────────
 
         allRows.append(makeSectionHeader("General"))
@@ -314,7 +322,7 @@ final class PreferencesWindowController: NSWindowController {
 
         // Checkbox-only rows (Show Band, Launch at Login)
         if subviews.count == 1, let checkbox = subviews.first as? NSButton,
-           checkbox.bezelStyle == .regularSquare || checkbox == launchCheckbox || checkbox == truncateCheckbox {
+           checkbox.bezelStyle == .regularSquare || checkbox == launchCheckbox || checkbox == truncateCheckbox || checkbox == geekModeCheckbox {
             checkbox.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
             return
         }
@@ -330,7 +338,7 @@ final class PreferencesWindowController: NSWindowController {
             let label = subviews[0] as! NSTextField
             let valueLabel = subviews[1] as! NSTextField
             let stepper = subviews[2] as! NSStepper
-            label.frame = NSRect(x: 0, y: 0, width: labelWidth, height: h)
+            label.frame = NSRect(x: 0, y: 2, width: labelWidth, height: h)
             let stepperW: CGFloat = stepper.frame.width
             let valueLabelW: CGFloat = 36
             valueLabel.frame = NSRect(x: labelWidth + 4, y: 0, width: valueLabelW, height: h)
@@ -453,6 +461,9 @@ final class PreferencesWindowController: NSWindowController {
 
         // Truncate at colon
         truncateCheckbox.state = defaults.bool(forKey: PrefKey.truncateAtColon) ? .on : .off
+
+        // Geek mode
+        geekModeCheckbox.state = defaults.bool(forKey: PrefKey.geekMode) ? .on : .off
 
         // Launch at login — read from SMAppService
         if #available(macOS 13.0, *) {
@@ -616,6 +627,11 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func truncateAtColonChanged(_ sender: NSButton) {
         UserDefaults.standard.set(sender.state == .on, forKey: PrefKey.truncateAtColon)
+        NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
+    }
+
+    @objc private func geekModeChanged(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state == .on, forKey: PrefKey.geekMode)
         NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
     }
 

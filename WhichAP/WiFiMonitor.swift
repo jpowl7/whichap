@@ -23,9 +23,10 @@ struct WiFiConnectionInfo {
         return rssi - noise
     }
 
-    /// Signal strength as a percentage (0–100).
+    /// Signal strength as a percentage (0–100), matched to Wi-Fi Signal app.
     var signalPercent: Int {
-        return max(0, min(100, 2 * (100 + rssi)))
+        let clamped = max(-100, min(-37, rssi))
+        return (clamped + 100) * 100 / 63
     }
 
     /// Noise floor as a percentage (0–100), where lower is better.
