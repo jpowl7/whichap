@@ -29,7 +29,6 @@ final class PreferencesWindowController: NSWindowController {
     private var intervalPopUp:    NSPopUpButton!
     private var maxLengthStepper: NSStepper!
     private var maxLengthLabel:   NSTextField!
-    // showBand removed — band is no longer shown in menu bar
     private var truncateCheckbox: NSButton!
     private var geekModeCheckbox: NSButton!
     private var launchCheckbox:   NSButton!
@@ -40,40 +39,26 @@ final class PreferencesWindowController: NSWindowController {
     private var manualBssidField:   NSTextField!
     private var addEntryButton:     NSButton!
     private var manualCountLabel:   NSTextField!
-    private var manualApNameRow:    NSView!
-    private var manualBssidRow:     NSView!
-    private var manualButtonRow:    NSView!
 
-    // Rows that toggle visibility
-    private var fileRow:     NSView!
-    private var urlRow:      NSView!
-    private var intervalRow: NSView!
+    // Conditional rows
+    private var fileRow:       NSView!
+    private var urlRow:        NSView!
+    private var intervalRow:   NSView!
     private var formatHintRow: NSView!
 
-    // Container that holds all rows — we recalculate its layout on source change
-    private var contentView: NSView!
+    // Layout
+    private var stackView: NSStackView!
 
-    // All rows in order (top to bottom visually)
-    private var allRows: [NSView] = []
+    // MARK: Geometry
 
-    // Section header marker
-    private var sectionHeaders: Set<ObjectIdentifier> = []
-
-    // MARK: Geometry constants
-
-    private let windowWidth:  CGFloat = 420
-    private let windowHeight: CGFloat = 574
-    private let sideMargin:   CGFloat = 20
-    private let rowHeight:    CGFloat = 26
-    private let rowSpacing:   CGFloat = 8
-    private let sectionGap:   CGFloat = 16
-    private let labelWidth:   CGFloat = 145
+    private let windowWidth: CGFloat = 340
+    private let contentInset: CGFloat = 20
 
     // MARK: Lifecycle
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 574),
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 100),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -90,7 +75,6 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     override func showWindow(_ sender: Any?) {
-        // Pre-fill current BSSID if connected
         if let bssid = CWWiFiClient.shared().interface()?.bssid() {
             manualBssidField.stringValue = bssid.split(separator: ":")
                 .map { octet -> String in
@@ -100,6 +84,7 @@ final class PreferencesWindowController: NSWindowController {
                 .joined(separator: ":")
         }
         updateManualCount()
+        sizeWindowToFit()
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -110,127 +95,151 @@ final class PreferencesWindowController: NSWindowController {
     private func buildUI() {
         guard let window = window else { return }
 
-        let container = NSView(frame: window.contentView!.bounds)
-        container.autoresizingMask = [.width, .height]
-        window.contentView = container
-        contentView = container
+        let scrollView = NSScrollView(frame: window.contentView!.bounds)
+        scrollView.autoresizingMask = [.width, .height]
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.autohidesScrollers = true
 
-        allRows = []
+        stackView = NSStackView()
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.spacing = 6
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.edgeInsets = NSEdgeInsets(top: contentInset, left: contentInset, bottom: contentInset, right: contentInset)
 
-        // ── Section: Mapping Data ──────────────────────────────────
+        let clipView = scrollView.contentView
+        scrollView.documentView = stackView
 
-        allRows.append(makeSectionHeader("Mapping Data"))
+        NSLayoutConstraint.activate([
+            stackView.topAnchor.constraint(equalTo: clipView.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+        ])
 
-        // Source row
-        let sourceRow = makeRow()
-        let sourceLabel = makeLabel("Source:")
+        window.contentView = scrollView
+
+        let fieldWidth = windowWidth - contentInset * 2
+
+        // ── Mapping Source ─────────────────────────────────────────
+
+        stackView.addArrangedSubview(makeSectionLabel("Mapping Source"))
+
         sourcePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
         sourcePopUp.addItems(withTitles: ["Bundled", "File", "URL"])
         sourcePopUp.target = self
         sourcePopUp.action = #selector(mappingSourceChanged(_:))
-        sourcePopUp.sizeToFit()
-        sourceRow.addSubview(sourceLabel)
-        sourceRow.addSubview(sourcePopUp)
-        allRows.append(sourceRow)
+        addWidthConstraint(sourcePopUp, width: fieldWidth)
+        stackView.addArrangedSubview(sourcePopUp)
 
-        // File row (conditional)
-        fileRow = makeRow()
-        let fileLabel = makeLabel("File:")
-        filePathLabel = NSTextField(labelWithString: "None selected")
-        filePathLabel.lineBreakMode = .byTruncatingMiddle
-        filePathLabel.textColor = .secondaryLabelColor
-        chooseFileButton = NSButton(title: "Choose\u{2026}", target: self, action: #selector(chooseFile(_:)))
-        chooseFileButton.bezelStyle = .rounded
-        chooseFileButton.sizeToFit()
-        fileRow.addSubview(fileLabel)
-        fileRow.addSubview(filePathLabel)
-        fileRow.addSubview(chooseFileButton)
-        allRows.append(fileRow)
+        // File row
+        fileRow = makeInlineRow {
+            self.filePathLabel = NSTextField(labelWithString: "None selected")
+            self.filePathLabel.lineBreakMode = .byTruncatingMiddle
+            self.filePathLabel.textColor = .secondaryLabelColor
+            self.filePathLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            self.filePathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // URL row (conditional)
-        urlRow = makeRow()
-        let urlLabel = makeLabel("URL:")
-        urlField = NSTextField(frame: .zero)
-        urlField.placeholderString = "https://example.com/mapping.json"
-        urlField.target = self
-        urlField.action = #selector(urlChanged(_:))
-        urlRow.addSubview(urlLabel)
-        urlRow.addSubview(urlField)
-        allRows.append(urlRow)
+            self.chooseFileButton = NSButton(title: "Choose\u{2026}", target: self, action: #selector(self.chooseFile(_:)))
+            self.chooseFileButton.bezelStyle = .rounded
+            self.chooseFileButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        // Fetch Interval row (conditional)
-        intervalRow = makeRow()
-        let intervalLabel = makeLabel("Fetch Interval:")
-        intervalPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
-        intervalPopUp.addItems(withTitles: ["Hourly", "Daily", "Weekly"])
-        intervalPopUp.target = self
-        intervalPopUp.action = #selector(fetchIntervalChanged(_:))
-        intervalPopUp.sizeToFit()
-        intervalRow.addSubview(intervalLabel)
-        intervalRow.addSubview(intervalPopUp)
-        allRows.append(intervalRow)
+            let row = NSStackView(views: [self.filePathLabel, self.chooseFileButton])
+            row.orientation = .horizontal
+            row.spacing = 8
+            self.addWidthConstraint(row, width: fieldWidth)
+            return row
+        }
+        stackView.addArrangedSubview(fileRow)
 
-        // Format hint (conditional — shown for File and URL)
-        formatHintRow = makeRow()
-        let hintLabel = NSTextField(wrappingLabelWithString:
-            "Accepted formats: JSON with \"apName\" and \"bssid\" fields, or CSV with apName,bssid columns. Ruckus Data Studio exports are supported.")
-        hintLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        hintLabel.textColor = .secondaryLabelColor
-        hintLabel.isSelectable = false
-        formatHintRow.addSubview(hintLabel)
-        allRows.append(formatHintRow)
+        // URL row
+        urlRow = makeInlineRow {
+            self.urlField = NSTextField(frame: .zero)
+            self.urlField.placeholderString = "https://example.com/mapping.json"
+            self.urlField.target = self
+            self.urlField.action = #selector(self.urlChanged(_:))
+            self.addWidthConstraint(self.urlField, width: fieldWidth)
+            return self.urlField
+        }
+        stackView.addArrangedSubview(urlRow)
 
-        // ── Section: Manual Entry ────────────────────────────────────
+        // Fetch interval row
+        intervalRow = makeInlineRow {
+            let label = self.makeFieldLabel("Refresh")
+            self.intervalPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+            self.intervalPopUp.addItems(withTitles: ["Hourly", "Daily", "Weekly"])
+            self.intervalPopUp.target = self
+            self.intervalPopUp.action = #selector(self.fetchIntervalChanged(_:))
+            let row = NSStackView(views: [label, self.intervalPopUp])
+            row.orientation = .horizontal
+            row.spacing = 6
+            return row
+        }
+        stackView.addArrangedSubview(intervalRow)
 
-        allRows.append(makeSectionHeader("Manual Entry"))
+        // Format hint
+        formatHintRow = makeInlineRow {
+            let hint = NSTextField(wrappingLabelWithString:
+                "JSON with \"apName\" and \"bssid\" fields, CSV with apName,bssid columns, or Ruckus Data Studio exports.")
+            hint.font = NSFont.systemFont(ofSize: 10)
+            hint.textColor = .tertiaryLabelColor
+            hint.isSelectable = false
+            self.addWidthConstraint(hint, width: fieldWidth)
+            return hint
+        }
+        stackView.addArrangedSubview(formatHintRow)
 
-        // AP Name row
-        manualApNameRow = makeRow()
-        let apNameLabel = makeLabel("AP Name:")
+        // ── Separator ──────────────────────────────────────────────
+
+        stackView.addArrangedSubview(makeSeparator(width: fieldWidth))
+
+        // ── Manual Entry ───────────────────────────────────────────
+
+        stackView.addArrangedSubview(makeSectionLabel("Add AP Mapping"))
+
+        // AP Name
+        stackView.addArrangedSubview(makeFieldLabel("AP Name"))
         manualApNameField = NSTextField(frame: .zero)
         manualApNameField.placeholderString = "e.g. Lobby North"
-        manualApNameRow.addSubview(apNameLabel)
-        manualApNameRow.addSubview(manualApNameField)
-        allRows.append(manualApNameRow)
+        addWidthConstraint(manualApNameField, width: fieldWidth)
+        stackView.addArrangedSubview(manualApNameField)
 
-        // BSSID row
-        manualBssidRow = makeRow()
-        let bssidLabel = makeLabel("Your current BSSID:")
+        // BSSID
+        stackView.addArrangedSubview(makeFieldLabel("Current BSSID"))
         manualBssidField = NSTextField(frame: .zero)
         manualBssidField.placeholderString = "e.g. 00:33:58:A9:B5:F0"
-        manualBssidRow.addSubview(bssidLabel)
-        manualBssidRow.addSubview(manualBssidField)
-        allRows.append(manualBssidRow)
+        addWidthConstraint(manualBssidField, width: fieldWidth)
+        stackView.addArrangedSubview(manualBssidField)
 
-        // Add button + count row
-        manualButtonRow = makeRow()
-        addEntryButton = NSButton(title: "Add", target: self, action: #selector(addManualEntry(_:)))
+        // Add button + count
+        addEntryButton = NSButton(title: "Add Mapping", target: self, action: #selector(addManualEntry(_:)))
         addEntryButton.bezelStyle = .rounded
-        addEntryButton.sizeToFit()
         manualCountLabel = NSTextField(labelWithString: "")
-        manualCountLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        manualCountLabel.textColor = .secondaryLabelColor
-        manualButtonRow.addSubview(manualCountLabel)
-        manualButtonRow.addSubview(addEntryButton)
-        allRows.append(manualButtonRow)
+        manualCountLabel.font = NSFont.systemFont(ofSize: 10)
+        manualCountLabel.textColor = .tertiaryLabelColor
+        let addRow = NSStackView(views: [addEntryButton, manualCountLabel])
+        addRow.orientation = .horizontal
+        addRow.spacing = 8
+        stackView.addArrangedSubview(addRow)
 
-        // View & Edit Mappings button row
-        let editMappingsRow = makeRow()
-        let editMappingsButton = NSButton(title: "View & Edit Mappings\u{2026}", target: self, action: #selector(showMappingEditor))
-        editMappingsButton.bezelStyle = .rounded
-        editMappingsButton.sizeToFit()
-        editMappingsRow.addSubview(editMappingsButton)
-        allRows.append(editMappingsRow)
+        // View & Edit Mappings
+        let editBtn = NSButton(title: "View & Edit Mappings\u{2026}", target: self, action: #selector(showMappingEditor))
+        editBtn.bezelStyle = .rounded
+        stackView.addArrangedSubview(editBtn)
 
-        // ── Section: Display ───────────────────────────────────────
+        // ── Separator ──────────────────────────────────────────────
 
-        allRows.append(makeSectionHeader("Display"))
+        stackView.addArrangedSubview(makeSeparator(width: fieldWidth))
 
-        // AP Name Max Length row
-        let maxLenRow = makeRow()
-        let maxLenLabel = makeLabel("AP Name Max Length:")
+        // ── Display ────────────────────────────────────────────────
+
+        stackView.addArrangedSubview(makeSectionLabel("Display"))
+
+        // Max length
         maxLengthLabel = NSTextField(labelWithString: "20")
         maxLengthLabel.alignment = .center
+        maxLengthLabel.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        addWidthConstraint(maxLengthLabel, width: 28)
         maxLengthStepper = NSStepper(frame: .zero)
         maxLengthStepper.minValue = 5
         maxLengthStepper.maxValue = 50
@@ -238,181 +247,76 @@ final class PreferencesWindowController: NSWindowController {
         maxLengthStepper.valueWraps = false
         maxLengthStepper.target = self
         maxLengthStepper.action = #selector(maxLengthChanged(_:))
-        maxLengthStepper.sizeToFit()
-        maxLenRow.addSubview(maxLenLabel)
-        maxLenRow.addSubview(maxLengthLabel)
-        maxLenRow.addSubview(maxLengthStepper)
-        allRows.append(maxLenRow)
+        let maxLenLabel = makeFieldLabel("AP name max length")
+        let maxLenRow = NSStackView(views: [maxLenLabel, maxLengthLabel, maxLengthStepper])
+        maxLenRow.orientation = .horizontal
+        maxLenRow.spacing = 4
+        stackView.addArrangedSubview(maxLenRow)
 
-        // Truncate at colon row
-        let truncateRow = makeRow()
+        // Truncate
         truncateCheckbox = NSButton(checkboxWithTitle: "Truncate AP name at \":\"", target: self, action: #selector(truncateAtColonChanged(_:)))
-        truncateRow.addSubview(truncateCheckbox)
-        allRows.append(truncateRow)
+        truncateCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        stackView.addArrangedSubview(truncateCheckbox)
 
-        // Geek mode row
-        let geekRow = makeRow()
+        // Geek mode
         geekModeCheckbox = NSButton(checkboxWithTitle: "Geek mode (signal, band, channel)", target: self, action: #selector(geekModeChanged(_:)))
-        geekRow.addSubview(geekModeCheckbox)
-        allRows.append(geekRow)
+        geekModeCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        stackView.addArrangedSubview(geekModeCheckbox)
 
-        // ── Section: General ───────────────────────────────────────
+        // ── Separator ──────────────────────────────────────────────
 
-        allRows.append(makeSectionHeader("General"))
+        stackView.addArrangedSubview(makeSeparator(width: fieldWidth))
 
-        // Launch at Login row
-        let launchRow = makeRow()
+        // ── General ────────────────────────────────────────────────
+
         launchCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: self, action: #selector(launchAtLoginChanged(_:)))
-        launchRow.addSubview(launchCheckbox)
-        allRows.append(launchRow)
-
-        // Add all rows to container
-        for row in allRows {
-            container.addSubview(row)
-        }
-
-        layoutRows()
-    }
-
-    // MARK: - Layout
-
-    private func layoutRows() {
-        let usableWidth = windowWidth - sideMargin * 2
-        var y = windowHeight - sideMargin
-
-        for row in allRows {
-            if row.isHidden { continue }
-
-            let isSectionHeader = sectionHeaders.contains(ObjectIdentifier(row))
-            if isSectionHeader {
-                // Extra gap before section headers (but not before the very first one)
-                if y < windowHeight - sideMargin {
-                    y -= sectionGap
-                }
-                row.frame = NSRect(x: sideMargin, y: y - rowHeight, width: usableWidth, height: rowHeight)
-                y -= rowHeight
-                continue
-            }
-
-            let currentRowHeight: CGFloat
-            if row === formatHintRow {
-                // Wrapping hint label needs more height
-                currentRowHeight = 48
-                row.frame = NSRect(x: sideMargin, y: y - currentRowHeight, width: usableWidth, height: currentRowHeight)
-                if let label = row.subviews.first as? NSTextField {
-                    label.frame = NSRect(x: 0, y: 0, width: usableWidth, height: currentRowHeight)
-                }
-            } else {
-                currentRowHeight = rowHeight
-                row.frame = NSRect(x: sideMargin, y: y - currentRowHeight, width: usableWidth, height: currentRowHeight)
-                layoutSubviewsOfRow(row, width: usableWidth)
-            }
-            y -= (currentRowHeight + rowSpacing)
-        }
-    }
-
-    private func layoutSubviewsOfRow(_ row: NSView, width: CGFloat) {
-        let h = rowHeight
-        // Offset to vertically align plain label text with text inside bordered controls
-        let labelDrop: CGFloat = -4
-
-        // Identify subviews by class to decide layout
-        let subviews = row.subviews
-
-        // Section header rows are just a single text field — already sized
-        if sectionHeaders.contains(ObjectIdentifier(row)) { return }
-
-        // Checkbox-only rows (Show Band, Launch at Login)
-        if subviews.count == 1, let checkbox = subviews.first as? NSButton,
-           checkbox.bezelStyle == .regularSquare || checkbox == launchCheckbox || checkbox == truncateCheckbox || checkbox == geekModeCheckbox {
-            checkbox.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
-            return
-        }
-
-        // Single button row (View & Edit Mappings)
-        if subviews.count == 1, let button = subviews.first as? NSButton, button.bezelStyle == .rounded {
-            button.frame = NSRect(x: labelWidth + 4, y: 0, width: button.frame.width, height: h)
-            return
-        }
-
-        // Stepper row (max length): label + value label + stepper
-        if subviews.contains(where: { $0 is NSStepper }) {
-            let label = subviews[0] as! NSTextField
-            let valueLabel = subviews[1] as! NSTextField
-            let stepper = subviews[2] as! NSStepper
-            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
-            let stepperW: CGFloat = stepper.frame.width
-            let valueLabelW: CGFloat = 36
-            valueLabel.frame = NSRect(x: labelWidth + 4, y: labelDrop, width: valueLabelW, height: h)
-            stepper.frame = NSRect(x: labelWidth + 4 + valueLabelW + 4, y: 2, width: stepperW, height: h - 4)
-            return
-        }
-
-        // File row: label + path label + choose button
-        if subviews.contains(where: { $0 === chooseFileButton }) {
-            let label = subviews[0] as! NSTextField
-            let pathLabel = subviews[1] as! NSTextField
-            let button = subviews[2] as! NSButton
-            let btnW = button.frame.width
-            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
-            button.frame = NSRect(x: width - btnW, y: 0, width: btnW, height: h)
-            pathLabel.frame = NSRect(x: labelWidth + 4, y: labelDrop, width: width - labelWidth - btnW - 12, height: h)
-            return
-        }
-
-        // Manual entry button row: count label + add button
-        if row === manualButtonRow {
-            let btnW = addEntryButton.frame.width
-            addEntryButton.frame = NSRect(x: labelWidth + 4, y: 0, width: btnW, height: h)
-            manualCountLabel.frame = NSRect(x: labelWidth + btnW + 12, y: 0, width: width - labelWidth - btnW - 16, height: h)
-            return
-        }
-
-        // PopUpButton row: label + popup
-        if let popup = subviews.last as? NSPopUpButton {
-            let label = subviews[0] as! NSTextField
-            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
-            popup.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
-            return
-        }
-
-        // Text field row (URL, AP Name, BSSID): label + text field
-        if subviews.count == 2, subviews[1] is NSTextField, !(subviews[1] is NSSecureTextField) {
-            let label = subviews[0] as! NSTextField
-            let field = subviews[1] as! NSTextField
-            label.frame = NSRect(x: 0, y: labelDrop, width: labelWidth, height: h)
-            field.frame = NSRect(x: labelWidth + 4, y: 0, width: width - labelWidth - 4, height: h)
-            return
-        }
+        launchCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        stackView.addArrangedSubview(launchCheckbox)
     }
 
     // MARK: - Helpers: View creation
 
-    private func makeRow() -> NSView {
-        let row = NSView(frame: .zero)
-        return row
-    }
-
-    private func makeSectionHeader(_ title: String) -> NSView {
-        let row = NSView(frame: .zero)
-        sectionHeaders.insert(ObjectIdentifier(row))
-
-        let label = NSTextField(labelWithString: title)
-        label.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
-        label.textColor = .labelColor
-        label.sizeToFit()
-        label.frame.origin = NSPoint(x: 0, y: 2)
-        row.addSubview(label)
-
-        return row
-    }
-
-    private func makeLabel(_ text: String) -> NSTextField {
+    private func makeSectionLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.alignment = .right
-        label.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         label.textColor = .labelColor
         return label
+    }
+
+    private func makeFieldLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
+
+    private func makeSeparator(width: CGFloat) -> NSView {
+        let sep = NSBox()
+        sep.boxType = .separator
+        addWidthConstraint(sep, width: width)
+        return sep
+    }
+
+    private func makeInlineRow(_ builder: () -> NSView) -> NSView {
+        return builder()
+    }
+
+    private func addWidthConstraint(_ view: NSView, width: CGFloat) {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: width).isActive = true
+    }
+
+    private func sizeWindowToFit() {
+        guard let window = window else { return }
+        stackView.layoutSubtreeIfNeeded()
+        let fittingSize = stackView.fittingSize
+        let maxH: CGFloat = 600
+        let h = min(fittingSize.height, maxH)
+        let frame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: windowWidth, height: h))
+        let currentFrame = window.frame
+        let newOrigin = NSPoint(x: currentFrame.midX - frame.width / 2,
+                                y: currentFrame.maxY - frame.height)
+        window.setFrame(NSRect(origin: newOrigin, size: frame.size), display: true, animate: false)
     }
 
     // MARK: - Load Stored Values
@@ -420,7 +324,6 @@ final class PreferencesWindowController: NSWindowController {
     private func loadCurrentValues() {
         let defaults = UserDefaults.standard
 
-        // Register defaults
         defaults.register(defaults: [
             PrefKey.mappingSource:   "bundled",
             PrefKey.mappingURL:      "",
@@ -430,7 +333,6 @@ final class PreferencesWindowController: NSWindowController {
             PrefKey.launchAtLogin:   true,
         ])
 
-        // Mapping source
         let source = defaults.string(forKey: PrefKey.mappingSource) ?? "bundled"
         switch source {
         case "file": sourcePopUp.selectItem(withTitle: "File")
@@ -438,16 +340,13 @@ final class PreferencesWindowController: NSWindowController {
         default:     sourcePopUp.selectItem(withTitle: "Bundled")
         }
 
-        // File path
         if let path = defaults.string(forKey: PrefKey.mappingFilePath), !path.isEmpty {
             filePathLabel.stringValue = (path as NSString).lastPathComponent
             filePathLabel.toolTip = path
         }
 
-        // URL
         urlField.stringValue = defaults.string(forKey: PrefKey.mappingURL) ?? ""
 
-        // Fetch interval
         let interval = defaults.string(forKey: PrefKey.fetchInterval) ?? "daily"
         switch interval {
         case "hourly":  intervalPopUp.selectItem(withTitle: "Hourly")
@@ -455,25 +354,19 @@ final class PreferencesWindowController: NSWindowController {
         default:        intervalPopUp.selectItem(withTitle: "Daily")
         }
 
-        // Max length
         let maxLen = defaults.integer(forKey: PrefKey.apNameMaxLength)
         let clampedMaxLen = max(5, min(50, maxLen == 0 ? 20 : maxLen))
         maxLengthStepper.integerValue = clampedMaxLen
         maxLengthLabel.stringValue = "\(clampedMaxLen)"
 
-        // Truncate at colon
         truncateCheckbox.state = defaults.bool(forKey: PrefKey.truncateAtColon) ? .on : .off
-
-        // Geek mode
         geekModeCheckbox.state = defaults.bool(forKey: PrefKey.geekMode) ? .on : .off
 
-        // Launch at login — read from SMAppService
         if #available(macOS 13.0, *) {
             let status = SMAppService.mainApp.status
             launchCheckbox.state = (status == .enabled) ? .on : .off
         }
 
-        // Manual entry count
         updateManualCount()
     }
 
@@ -482,12 +375,12 @@ final class PreferencesWindowController: NSWindowController {
     private func updateConditionalVisibility(animated: Bool) {
         let source = selectedSourceValue()
 
-        fileRow.isHidden      = (source != "file")
-        urlRow.isHidden       = (source != "url")
-        intervalRow.isHidden  = (source != "url")
+        fileRow.isHidden       = (source != "file")
+        urlRow.isHidden        = (source != "url")
+        intervalRow.isHidden   = (source != "url")
         formatHintRow.isHidden = (source == "bundled")
 
-        layoutRows()
+        sizeWindowToFit()
     }
 
     private func selectedSourceValue() -> String {
@@ -599,7 +492,6 @@ final class PreferencesWindowController: NSWindowController {
             return
         }
 
-        // Basic BSSID format validation (should contain colons)
         guard bssid.contains(":") else {
             let alert = NSAlert()
             alert.messageText = "Invalid BSSID"
@@ -650,7 +542,6 @@ final class PreferencesWindowController: NSWindowController {
                     try SMAppService.mainApp.unregister()
                 }
             } catch {
-                // Revert checkbox state on failure
                 sender.state = shouldEnable ? .off : .on
                 let alert = NSAlert(error: error)
                 alert.runModal()
