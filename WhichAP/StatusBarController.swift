@@ -60,13 +60,13 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             self,
             selector: #selector(menuDidOpen),
             name: NSMenu.didBeginTrackingNotification,
-            object: nil
+            object: menu
         )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(menuDidClose),
             name: NSMenu.didEndTrackingNotification,
-            object: nil
+            object: menu
         )
 
         wifiMonitor.delegate = self
@@ -680,15 +680,24 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         do {
             try interface.setPower(false)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                try? interface.setPower(true)
+                do {
+                    try interface.setPower(true)
+                } catch {
+                    let alert = NSAlert()
+                    alert.messageText = "Failed to re-enable Wi-Fi"
+                    alert.informativeText = "Wi-Fi was turned off but could not be turned back on. Please re-enable it manually.\n\n\(error.localizedDescription)"
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                }
             }
         } catch {
-            // Silently fail
+            // Power-off failed — Wi-Fi is still on, no action needed
         }
     }
 
     @objc private func openWifiSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.wifi-settings")!)
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func quitApp() {

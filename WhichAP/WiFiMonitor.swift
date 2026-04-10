@@ -85,9 +85,8 @@ final class ConnectionHistoryStore {
     private let decoder: JSONDecoder
 
     private init() {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            fatalError("Cannot access Application Support directory")
-        }
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         let dir = appSupport.appendingPathComponent("WhichAP", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("connection-history.json")
@@ -215,7 +214,9 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
 
     private func startPolling(interval: TimeInterval) {
         stopPolling()
-        let timer = Timer(timeInterval: interval, target: self, selector: #selector(pollFired), userInfo: nil, repeats: true)
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
         timer.tolerance = interval * 0.1
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
@@ -224,10 +225,6 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
     private func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
-    }
-
-    @objc private func pollFired() {
-        poll()
     }
 
     func clearHistory() {
@@ -318,11 +315,10 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
         }
 
         // If there is no SSID the interface is likely disconnected.
-        guard interface.ssid() != nil else {
+        let ssid = interface.ssid()
+        guard ssid != nil else {
             return nil
         }
-
-        let ssid = interface.ssid()
         let rawBSSID = interface.bssid()
         let bssid = rawBSSID.map { normalizeBSSID($0) }
         let rssi = interface.rssiValue()

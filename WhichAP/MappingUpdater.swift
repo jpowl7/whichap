@@ -90,8 +90,10 @@ final class MappingUpdater {
 
         let defaults = UserDefaults.standard
         guard let urlString = defaults.string(forKey: DefaultsKey.mappingURL),
-              let url = URL(string: urlString) else {
-            logger.error("fetchNow: invalid URL string in UserDefaults.")
+              let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else {
+            logger.error("fetchNow: invalid or disallowed URL in UserDefaults.")
             return
         }
 

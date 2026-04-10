@@ -7,3 +7,4 @@ DerivedData/
 *.swo
 *~
 AP_to_BSSID_Mapping*
+whichap-mapping.json

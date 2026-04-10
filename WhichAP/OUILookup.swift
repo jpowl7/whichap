@@ -41,8 +41,7 @@ final class OUILookup {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let found = json["found"] as? Bool, found,
                   let company = json["company"] as? String else {
-                // Cache empty string to avoid re-fetching failures
-                self?.queue.sync { self?.cache[oui] = "" }
+                // Don't cache failures — allow retry on next poll
                 completion?(nil)
                 return
             }
