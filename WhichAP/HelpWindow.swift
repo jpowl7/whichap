@@ -43,6 +43,15 @@ final class HelpWindowController: NSWindowController {
 
         Use "View & Edit Mappings" in Preferences to see all entries, search, and edit manual ones.
 
+        Display Options
+        ━━━━━━━━━━━━━━━
+        In Preferences under Display:
+
+        • AP Name Max Length — limits how many characters are shown in the menu bar
+        • Truncate AP name at ":" — hides the technical suffix after ":" in AP names
+        • Geek mode — changes the menu bar to show SSID:AP Name on the top line \
+        and signal%, band, and channel on the bottom line (e.g. 84%|5GHz|ch149)
+
         Signal Quality
         ━━━━━━━━━━━━━━
         The menu bar text and Signal line turn red when your connection is Poor or Bad:
@@ -57,6 +66,7 @@ final class HelpWindowController: NSWindowController {
         ━━━━━━━━━━━━━━━━━━
         • Click any info item to copy its value to the clipboard
         • "Copy All to Clipboard" copies everything formatted for a support ticket
+        • "Manufacturer" shows the AP vendor based on its BSSID (looked up from the IEEE database)
         • "Restart Wi-Fi" toggles your Wi-Fi off and back on
         • "Wi-Fi Settings" opens macOS Wi-Fi settings
         • "Mac Uptime" shows how long since your last restart
@@ -94,6 +104,7 @@ final class HelpWindowController: NSWindowController {
         let headers = [
             "Getting Started",
             "Providing Your BSSID Mapping",
+            "Display Options",
             "Signal Quality",
             "Using the Dropdown",
             "Location Services",
