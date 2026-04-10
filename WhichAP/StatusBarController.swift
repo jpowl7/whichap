@@ -143,7 +143,8 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     // MARK: - AP Name Lookup
 
     func apName(forBSSID bssid: String) -> String? {
-        return BSSIDMapping.shared.apName(forBSSID: bssid)
+        guard let fullName = BSSIDMapping.shared.apName(forBSSID: bssid) else { return nil }
+        return WiFiMonitor.displayName(from: fullName)
     }
 
     // MARK: - Display Settings (cached, refreshed on settings change)

@@ -235,7 +235,8 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
     }
 
     private func recordConnectionEvent(for info: WiFiConnectionInfo) {
-        let apName = info.bssid.flatMap { BSSIDMapping.shared.apName(forBSSID: $0) }
+        let fullName = info.bssid.flatMap { BSSIDMapping.shared.apName(forBSSID: $0) }
+        let apName = fullName.map { Self.displayName(from: $0) }
         let event = ConnectionEvent(
             timestamp: Date(),
             ssid: info.ssid,
@@ -350,6 +351,17 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
             ipAddress: ipAddress,
             signalQuality: SignalQuality(rssi: rssi)
         )
+    }
+
+    // MARK: AP display name
+
+    /// Returns only the friendly location portion of an AP name (before " : ").
+    static func displayName(from fullName: String) -> String {
+        if let range = fullName.range(of: " : ") {
+            return fullName[fullName.startIndex..<range.lowerBound]
+                .trimmingCharacters(in: .whitespaces)
+        }
+        return fullName
     }
 
     // MARK: BSSID normalization
