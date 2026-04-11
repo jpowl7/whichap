@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "fetchInterval": "daily",
             "apNameMaxLength": 20,
             "showBand": true,
+            "truncateAtColon": true,
             "launchAtLogin": true,
         ])
 
