@@ -13,6 +13,7 @@ final class ConnectionHistoryWindowController: NSWindowController, NSTableViewDa
             defer: false
         )
         window.title = "Connection History"
+        window.collectionBehavior = .moveToActiveSpace
         window.center()
         window.setFrameAutosaveName("ConnectionHistoryWindow")
         window.minSize = NSSize(width: 400, height: 200)

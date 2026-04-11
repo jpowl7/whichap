@@ -66,6 +66,7 @@ final class PreferencesWindowController: NSWindowController {
         window.title = "WhichAP Preferences"
         window.isReleasedWhenClosed = false
         window.level = .floating
+        window.collectionBehavior = .moveToActiveSpace
 
         self.init(window: window)
 

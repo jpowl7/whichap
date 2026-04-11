@@ -10,6 +10,7 @@ final class HelpWindowController: NSWindowController {
             defer: false
         )
         window.title = "WhichAP Help"
+        window.collectionBehavior = .moveToActiveSpace
         window.center()
         window.setFrameAutosaveName("HelpWindow")
         window.minSize = NSSize(width: 320, height: 300)

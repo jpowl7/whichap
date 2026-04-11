@@ -19,6 +19,7 @@ final class MappingEditorWindowController: NSWindowController, NSTableViewDataSo
         )
         window.title = "BSSID Mappings"
         window.level = .floating
+        window.collectionBehavior = .moveToActiveSpace
         window.center()
         window.setFrameAutosaveName("MappingEditorWindow")
         window.minSize = NSSize(width: 400, height: 250)
