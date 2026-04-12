@@ -85,20 +85,6 @@ On first launch, you'll see: *"WhichAP would like to use your current location"*
 
 If denied, the app still works but only shows the SSID (no AP name).
 
-## Jamf Deployment
-
-WhichAP supports managed preferences via the `com.grangerchurch.whichap` domain. Set these keys in a Configuration Profile:
-
-| Key | Type | Values |
-|-----|------|--------|
-| `mappingSource` | String | `bundled`, `file`, `url` |
-| `mappingURL` | String | HTTPS URL to mapping JSON |
-| `fetchInterval` | String | `hourly`, `daily`, `weekly` |
-| `launchAtLogin` | Boolean | `true` / `false` |
-| `geekMode` | Boolean | `true` / `false` |
-| `truncateAtColon` | Boolean | `true` / `false` |
-| `apNameMaxLength` | Integer | 5–50 (default 20) |
-
 ## Requirements
 
 - macOS 13 Ventura or later
