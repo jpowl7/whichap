@@ -1,4 +1,5 @@
 import Cocoa
+import CoreLocation
 import CoreWLAN
 
 final class StatusBarController: NSObject, WiFiMonitorDelegate {
@@ -18,6 +19,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
     private let apNameItem = NSMenuItem()
     private let locationHintItem = NSMenuItem()
+    private let locationHeaderItem = NSMenuItem()
+    private let locationExplainerItem = NSMenuItem()
+    private let openLocationSettingsItem = NSMenuItem()
+    private let grantLocationAccessItem = NSMenuItem()
     private let ssidItem = NSMenuItem()
     private let securityItem = NSMenuItem()
     private let bssidItem = NSMenuItem()
@@ -41,7 +46,8 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private let copyItem = NSMenuItem()
     private let sep5 = NSMenuItem.separator()
 
-    private var menuIsConnected: Bool? = nil
+    private var currentLocationAccess: LocationAccess = .notDetermined
+    private var introPanelShown = false
 
     // MARK: - Lifecycle
 
@@ -70,6 +76,8 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         )
 
         wifiMonitor.delegate = self
+        // Pick up the initial location state set during WiFiMonitor init
+        handleLocationAccessChange(wifiMonitor.locationAccess)
 
         NotificationCenter.default.addObserver(
             self,
@@ -94,6 +102,67 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             self.updateMenuBarText(with: info)
             self.updateMenu(with: info)
         }
+    }
+
+    func wifiMonitor(_ monitor: WiFiMonitor, didChangeLocationAccess access: LocationAccess) {
+        DispatchQueue.main.async { [weak self] in
+            self?.handleLocationAccessChange(access)
+        }
+    }
+
+    // MARK: - Location Access Handling
+
+    private func handleLocationAccessChange(_ access: LocationAccess) {
+        currentLocationAccess = access
+        updateMenuBarText(with: latestInfo)
+        updateMenu(with: latestInfo)
+
+        if access == .notDetermined && !introPanelShown {
+            introPanelShown = true
+            DispatchQueue.main.async { [weak self] in
+                self?.presentLocationIntroAndRequest()
+            }
+        }
+
+        if access == .authorized {
+            UserDefaults.standard.set(true, forKey: "locationPromptCompleted")
+        }
+    }
+
+    private func presentLocationIntroAndRequest() {
+        if UserDefaults.standard.bool(forKey: "locationPromptCompleted") {
+            wifiMonitor.requestLocationPermission()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Location Access Required"
+        alert.informativeText = """
+        WhichAP needs Location Services permission to read your Wi-Fi connection details — this is an Apple requirement for reading SSIDs and BSSIDs on macOS.
+
+        After you click Continue, you'll see a macOS permission prompt. Please click "Allow" to enable WhichAP.
+
+        Your location is never stored, transmitted, or used for anything other than identifying your current Wi-Fi network.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Not Now")
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            wifiMonitor.requestLocationPermission()
+        }
+    }
+
+    @objc private func openLocationSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices")!
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func grantLocationAccess() {
+        NSApp.activate(ignoringOtherApps: true)
+        wifiMonitor.requestLocationPermission()
     }
 
     // MARK: - Menu Open/Close (live timer)
@@ -131,18 +200,36 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
     @objc private func displaySettingsChanged() {
         refreshCachedSettings()
-        // Clear cache so display mode changes take effect immediately
-        lastMenuBarTop = nil
-        lastMenuBarBottom = nil
-        lastMenuBarPoor = nil
+        clearMenuCache()
         updateMenuBarText(with: latestInfo)
         updateMenu(with: latestInfo)
     }
 
     @objc private func mappingChanged() {
         refreshCachedSettings()
+        clearMenuCache()
         updateMenuBarText(with: latestInfo)
         updateMenu(with: latestInfo)
+    }
+
+    private func clearMenuCache() {
+        lastMenuBarTop = nil
+        lastMenuBarBottom = nil
+        lastMenuBarPoor = nil
+        lastApDisplayName = nil
+        lastSignalText = nil
+        lastSignalPoor = nil
+        lastLocationAccess = nil
+        lastMenuSSID = nil
+        lastMenuSecurity = nil
+        lastMenuBSSID = nil
+        lastMenuNoise = nil
+        lastMenuSNR = nil
+        lastMenuBand = nil
+        lastMenuMode = nil
+        lastMenuTxRate = nil
+        lastMenuIP = nil
+        lastMenuShowConnection = nil
     }
 
     // MARK: - AP Name Lookup
@@ -188,12 +275,52 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private var lastApDisplayName: String?
     private var lastSignalText: String?
     private var lastSignalPoor: Bool?
+    private var lastLocationAccess: LocationAccess?
+
+    // Change tracking for updateMenu to avoid redundant NSMenuItem property sets
+    private var lastMenuSSID: String?
+    private var lastMenuSecurity: String?
+    private var lastMenuBSSID: String?
+    private var lastMenuNoise: String?
+    private var lastMenuSNR: String?
+    private var lastMenuBand: String?
+    private var lastMenuMode: String?
+    private var lastMenuTxRate: String?
+    private var lastMenuIP: String?
+    private var lastMenuShowConnection: Bool?
 
     private func updateMenuBarText(with info: WiFiConnectionInfo?) {
         guard let button = statusItem.button else { return }
 
+        // Location permission states take precedence over connection state
+        switch currentLocationAccess {
+        case .denied, .restricted, .systemDisabled:
+            removeStackView()
+            button.appearsDisabled = false
+            button.attributedTitle = NSAttributedString(string: "\u{26A0} Location Off", attributes: [
+                .foregroundColor: NSColor.systemRed,
+                .font: NSFont.menuBarFont(ofSize: 0),
+            ])
+            lastMenuBarTop = nil
+            lastMenuBarBottom = nil
+            lastMenuBarPoor = nil
+            return
+        case .notDetermined:
+            removeStackView()
+            button.appearsDisabled = true
+            button.attributedTitle = NSAttributedString(string: "")
+            button.title = "WhichAP"
+            lastMenuBarTop = nil
+            lastMenuBarBottom = nil
+            lastMenuBarPoor = nil
+            return
+        case .authorized:
+            break
+        }
+
         guard let info, let ssid = info.ssid else {
             removeStackView()
+            button.attributedTitle = NSAttributedString(string: "")
             button.title = "No Wi-Fi"
             button.appearsDisabled = true
             // Clear cached state so reconnect triggers a full update
@@ -342,6 +469,47 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
         menu.addItem(uptimeItem)
 
+        // Location permission UI (shown only when location is denied/restricted/notDetermined)
+        locationHeaderItem.attributedTitle = NSAttributedString(
+            string: "Location Access Required",
+            attributes: [
+                .font: NSFont.boldSystemFont(ofSize: 13),
+                .foregroundColor: NSColor.systemRed,
+            ]
+        )
+        menu.addItem(locationHeaderItem)
+
+        locationExplainerItem.attributedTitle = NSAttributedString(
+            string: "WhichAP needs Location Services to read\nyour Wi-Fi SSID and AP details.",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        menu.addItem(locationExplainerItem)
+
+        openLocationSettingsItem.attributedTitle = NSAttributedString(
+            string: "Open Location Settings\u{2026}",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: NSColor.systemBlue,
+            ]
+        )
+        openLocationSettingsItem.action = #selector(openLocationSettings)
+        openLocationSettingsItem.target = self
+        menu.addItem(openLocationSettingsItem)
+
+        grantLocationAccessItem.attributedTitle = NSAttributedString(
+            string: "Grant Location Access\u{2026}",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: NSColor.systemBlue,
+            ]
+        )
+        grantLocationAccessItem.action = #selector(grantLocationAccess)
+        grantLocationAccessItem.target = self
+        menu.addItem(grantLocationAccessItem)
+
         menu.addItem(locationHintItem)
 
         // Copy hint
@@ -427,39 +595,94 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
     private func updateMenu(with info: WiFiConnectionInfo?) {
         let isConnected = info?.ssid != nil
+        let locationSystemOff = currentLocationAccess == .systemDisabled
+        let locationBlocked = currentLocationAccess == .denied || currentLocationAccess == .restricted
+        let locationPending = currentLocationAccess == .notDetermined
+        let locationUnavailable = locationSystemOff || locationBlocked || locationPending
+        let showConnectionInfo = isConnected && currentLocationAccess == .authorized
 
-        if menuIsConnected != isConnected {
-            menuIsConnected = isConnected
+        // Only update location section and visibility when state actually changes
+        if currentLocationAccess != lastLocationAccess || showConnectionInfo != (lastMenuShowConnection ?? false) {
+            lastLocationAccess = currentLocationAccess
+            lastMenuShowConnection = showConnectionInfo
 
-            apNameItem.isHidden = !isConnected
-            restartWifiItem.isHidden = !isConnected
+            locationHeaderItem.isHidden = !locationUnavailable
+            locationExplainerItem.isHidden = !locationUnavailable
+            openLocationSettingsItem.isHidden = !(locationBlocked || locationSystemOff)
+            grantLocationAccessItem.isHidden = !locationPending
+
+            if locationSystemOff {
+                locationHeaderItem.attributedTitle = NSAttributedString(
+                    string: "Location Services Disabled",
+                    attributes: [
+                        .font: NSFont.boldSystemFont(ofSize: 13),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ]
+                )
+                locationExplainerItem.attributedTitle = NSAttributedString(
+                    string: "Location Services is turned off system-wide.\nOpen Settings and turn on Location Services\nat the top of the list.",
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ]
+                )
+            } else if locationBlocked {
+                locationHeaderItem.attributedTitle = NSAttributedString(
+                    string: "Location Access Required",
+                    attributes: [
+                        .font: NSFont.boldSystemFont(ofSize: 13),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ]
+                )
+                locationExplainerItem.attributedTitle = NSAttributedString(
+                    string: "Find WhichAP in Location Services\nand toggle it on.",
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ]
+                )
+            } else if locationPending {
+                locationHeaderItem.attributedTitle = NSAttributedString(
+                    string: "Location Permission Needed",
+                    attributes: [
+                        .font: NSFont.boldSystemFont(ofSize: 13),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ]
+                )
+                locationExplainerItem.attributedTitle = NSAttributedString(
+                    string: "Click below to grant location access.",
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ]
+                )
+            }
+
+            apNameItem.isHidden = !showConnectionInfo
+            restartWifiItem.isHidden = !showConnectionInfo
             locationHintItem.isHidden = true
-            copyHintItem.isHidden = !isConnected
-            sep1.isHidden = !isConnected
-            ssidItem.isHidden = !isConnected
-            securityItem.isHidden = !isConnected
-            bssidItem.isHidden = !isConnected
-            manufacturerItem.isHidden = !isConnected
-            sep2.isHidden = !isConnected
-            signalItem.isHidden = !isConnected
-            noiseItem.isHidden = !isConnected
-            snrItem.isHidden = !isConnected
-            sep3.isHidden = !isConnected
-            bandItem.isHidden = !isConnected
-            modeItem.isHidden = !isConnected
-            txRateItem.isHidden = !isConnected
-            ipItem.isHidden = !isConnected
-            connectedTimeItem.isHidden = !isConnected
-
-            disconnectedItem.isHidden = isConnected
-
-            copyItem.isHidden = !isConnected
-            sep5.isHidden = !isConnected
+            copyHintItem.isHidden = !showConnectionInfo
+            sep1.isHidden = !showConnectionInfo
+            ssidItem.isHidden = !showConnectionInfo
+            securityItem.isHidden = !showConnectionInfo
+            bssidItem.isHidden = !showConnectionInfo
+            manufacturerItem.isHidden = !showConnectionInfo
+            sep2.isHidden = !showConnectionInfo
+            signalItem.isHidden = !showConnectionInfo
+            noiseItem.isHidden = !showConnectionInfo
+            snrItem.isHidden = !showConnectionInfo
+            sep3.isHidden = !showConnectionInfo
+            bandItem.isHidden = !showConnectionInfo
+            modeItem.isHidden = !showConnectionInfo
+            txRateItem.isHidden = !showConnectionInfo
+            ipItem.isHidden = !showConnectionInfo
+            connectedTimeItem.isHidden = !showConnectionInfo
+            disconnectedItem.isHidden = showConnectionInfo || locationUnavailable
+            copyItem.isHidden = !showConnectionInfo
+            sep5.isHidden = !showConnectionInfo
         }
 
-        updateUptime()
-
-        guard let info, let ssid = info.ssid else {
+        guard showConnectionInfo, let info, let ssid = info.ssid else {
             disconnectedItem.title = "Not connected to Wi-Fi"
             return
         }
@@ -483,22 +706,34 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             )
         }
 
-        locationHintItem.isHidden = info.locationAuthorized
+        // Network info — only set when values change
+        let ssidText = "SSID: \(ssid)"
+        if ssidText != lastMenuSSID {
+            lastMenuSSID = ssidText
+            ssidItem.title = ssidText
+        }
 
-        // Network info
-        ssidItem.title = "SSID: \(ssid)"
-        securityItem.title = "Security: \(info.security)"
-        bssidItem.title = "BSSID: \(info.bssid ?? "Unavailable")"
+        let securityText = "Security: \(info.security)"
+        if securityText != lastMenuSecurity {
+            lastMenuSecurity = securityText
+            securityItem.title = securityText
+        }
 
-        // Manufacturer (OUI lookup — async with cache)
-        if let bssid = info.bssid {
-            OUILookup.shared.manufacturer(forBSSID: bssid) { [weak self] mfr in
-                DispatchQueue.main.async {
-                    self?.manufacturerItem.title = "Manufacturer: \(mfr ?? "Unknown")"
+        let bssidText = "BSSID: \(info.bssid ?? "Unavailable")"
+        if bssidText != lastMenuBSSID {
+            lastMenuBSSID = bssidText
+            bssidItem.title = bssidText
+
+            // Only look up manufacturer when BSSID actually changes
+            if let bssid = info.bssid {
+                OUILookup.shared.manufacturer(forBSSID: bssid) { [weak self] mfr in
+                    DispatchQueue.main.async {
+                        self?.manufacturerItem.title = "Manufacturer: \(mfr ?? "Unknown")"
+                    }
                 }
+            } else {
+                manufacturerItem.title = "Manufacturer: Unknown"
             }
-        } else {
-            manufacturerItem.title = "Manufacturer: Unknown"
         }
 
         // Signal quality
@@ -518,16 +753,47 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
                 signalItem.title = signalText
             }
         }
-        noiseItem.title = "Noise: \(info.noise) dBm — \(info.noisePercent)%"
-        snrItem.title = "SNR: \(info.snr) dB"
 
-        // Connection details
-        bandItem.title = "Band: \(info.band) | Ch \(info.channelNumber) (\(info.channelWidth))"
-        modeItem.title = "Mode: \(info.phyMode)"
-        txRateItem.title = "Tx Rate: \(formatTxRate(info.transmitRate)) Mbps"
-        ipItem.title = "IP: \(info.ipAddress ?? "Unavailable")"
+        let noiseText = "Noise: \(info.noise) dBm — \(info.noisePercent)%"
+        if noiseText != lastMenuNoise {
+            lastMenuNoise = noiseText
+            noiseItem.title = noiseText
+        }
 
-        // Connected time
+        let snrText = "SNR: \(info.snr) dB"
+        if snrText != lastMenuSNR {
+            lastMenuSNR = snrText
+            snrItem.title = snrText
+        }
+
+        let bandText = "Band: \(info.band) | Ch \(info.channelNumber) (\(info.channelWidth))"
+        if bandText != lastMenuBand {
+            lastMenuBand = bandText
+            bandItem.title = bandText
+        }
+
+        let modeText = "Mode: \(info.phyMode)"
+        if modeText != lastMenuMode {
+            lastMenuMode = modeText
+            modeItem.title = modeText
+        }
+
+        let txText = "Tx Rate: \(formatTxRate(info.transmitRate)) Mbps"
+        if txText != lastMenuTxRate {
+            lastMenuTxRate = txText
+            txRateItem.title = txText
+        }
+
+        let ipText = "IP: \(info.ipAddress ?? "Unavailable")"
+        if ipText != lastMenuIP {
+            lastMenuIP = ipText
+            ipItem.title = ipText
+        }
+
+        // Uptime and connected time — these always change (time-based) but only
+        // modify dropdown menu items, not the status bar button, so they don't
+        // trigger the expensive NSStatusItem _updateReplicants redraw.
+        updateUptime()
         updateConnectedTime()
     }
 

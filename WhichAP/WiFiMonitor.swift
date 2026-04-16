@@ -2,6 +2,16 @@ import Foundation
 import CoreWLAN
 import CoreLocation
 
+// MARK: - LocationAccess
+
+enum LocationAccess: Equatable {
+    case notDetermined
+    case authorized
+    case denied
+    case restricted
+    case systemDisabled
+}
+
 // MARK: - WiFiConnectionInfo
 
 struct WiFiConnectionInfo {
@@ -116,6 +126,7 @@ final class ConnectionHistoryStore {
 
 protocol WiFiMonitorDelegate: AnyObject {
     func wifiMonitor(_ monitor: WiFiMonitor, didUpdateConnection info: WiFiConnectionInfo?)
+    func wifiMonitor(_ monitor: WiFiMonitor, didChangeLocationAccess access: LocationAccess)
 }
 
 // MARK: - WiFiMonitor
@@ -156,8 +167,10 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
     /// History of AP connections, newest first
     private(set) var connectionHistory: [ConnectionEvent] = []
 
-    private(set) var locationAuthorized: Bool = false
+    private(set) var locationAccess: LocationAccess = .notDetermined
     private(set) var latestInfo: WiFiConnectionInfo?
+
+    var locationAuthorized: Bool { locationAccess == .authorized }
 
     // MARK: Lifecycle
 
@@ -167,7 +180,9 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
         super.init()
         connectionHistory = ConnectionHistoryStore.shared.load()
         locationManager.delegate = self
-        locationManager.requestWhenInUseAuthorization()
+        // On macOS, setting the delegate does not reliably fire the initial
+        // authorization callback, so read the current status directly.
+        locationAccess = Self.resolveAccess(locationManager.authorizationStatus)
 
         // Monitor Wi-Fi events so we detect reconnects after toggles
         wifiClient.delegate = self
@@ -178,15 +193,50 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
         startPolling(interval: PollInterval.disconnected)
     }
 
+    private static func resolveAccess(_ status: CLAuthorizationStatus) -> LocationAccess {
+        if !CLLocationManager.locationServicesEnabled() {
+            return .systemDisabled
+        }
+        switch status {
+        case .notDetermined:                return .notDetermined
+        case .authorized, .authorizedAlways: return .authorized
+        case .denied:                        return .denied
+        case .restricted:                    return .restricted
+        @unknown default:                    return .denied
+        }
+    }
+
     deinit {
         stopPolling()
+    }
+
+    // MARK: Location permission
+
+    /// Triggers the macOS location permission prompt if status is .notDetermined.
+    /// Caller should activate the app first so the prompt appears on top.
+    func requestLocationPermission() {
+        locationManager.requestWhenInUseAuthorization()
+        // Belt-and-suspenders: on some macOS versions, LSUIElement apps need
+        // startUpdatingLocation() to actually surface the prompt. We stop
+        // updating as soon as we get a determinate authorization status.
+        locationManager.startUpdatingLocation()
     }
 
     // MARK: CLLocationManagerDelegate
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
-        locationAuthorized = (status == .authorizedAlways || status == .authorized)
+        let newAccess = Self.resolveAccess(status)
+
+        if status != .notDetermined {
+            manager.stopUpdatingLocation()
+        }
+
+        let changed = newAccess != locationAccess
+        locationAccess = newAccess
+        if changed {
+            delegate?.wifiMonitor(self, didChangeLocationAccess: newAccess)
+        }
         poll()
     }
 
@@ -342,7 +392,7 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
             channelWidth: channelWidth,
             band: band,
             transmitRate: txRate,
-            locationAuthorized: locationAuthorized,
+            locationAuthorized: locationAccess == .authorized,
             phyMode: phyMode,
             security: security,
             ipAddress: ipAddress,

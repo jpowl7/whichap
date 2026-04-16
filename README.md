@@ -81,9 +81,19 @@ TechOps - AC43,00:33:58:A9:EC:02
 
 WhichAP requires Location Services permission to read the BSSID from CoreWLAN. This is an Apple requirement — the app does **not** track or store your location.
 
-On first launch, you'll see: *"WhichAP would like to use your current location"* — click **Allow**.
+On first launch, WhichAP shows a brief intro panel explaining what's about to happen, then triggers the macOS permission prompt. Click **Allow**.
 
-If denied, the app still works but only shows the SSID (no AP name).
+### If the prompt never appeared
+
+If the menu bar says **"⚠ Location Off"** even when you're connected to Wi-Fi, click the WhichAP menu. You'll see one of three states:
+
+- **"Location Services Disabled"** — the system-wide Location Services switch is off. Click **Open Location Settings…** and turn on the master switch at the top.
+- **"Location Access Required"** — WhichAP is in the list but toggled off. Click **Open Location Settings…** and toggle WhichAP on.
+- **"Location Permission Needed"** — the macOS prompt hasn't been shown yet. Click **Grant Location Access…** to trigger it.
+
+### IT admins (Jamf / MDM)
+
+Location Services **cannot** be pre-granted via MDM configuration profiles — Apple intentionally requires user consent for location access ([PPPC payload reference](https://support.apple.com/guide/deployment/privacy-preferences-policy-control-payload-dep38df53c2a/web)). However, a Jamf post-install script can pre-authorize the app by writing to `/var/db/locationd/clients.plist`. See the Jamf deployment notes for the script.
 
 ## Requirements
 

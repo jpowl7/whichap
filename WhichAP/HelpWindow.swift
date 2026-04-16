@@ -80,6 +80,32 @@ final class HelpWindowController: NSWindowController {
 
         If you denied the permission, go to System Settings > Privacy & Security > \
         Location Services and enable it for WhichAP.
+
+        Troubleshooting
+        ━━━━━━━━━━━━━━━
+        "⚠ Location Off" in the menu bar:
+        This means Location Services permission isn't granted for WhichAP. Open the \
+        WhichAP menu — you'll see clear instructions and a button to open Location \
+        Settings directly.
+
+        "Location Services Disabled" in the menu:
+        The system-wide Location Services switch is off. Open Location Settings (button \
+        in the WhichAP menu) and turn on the master switch at the top of the list.
+
+        "Location Access Required" in the menu:
+        WhichAP is listed in Location Services but toggled off. Open Location Settings \
+        and find WhichAP in the list — toggle it on.
+
+        The permission prompt never appeared:
+        On first launch, WhichAP shows an intro panel then triggers the macOS prompt. \
+        If you missed it, click WhichAP in the menu bar, then click "Grant Location \
+        Access…" to try again. If that doesn't work, open Location Settings and toggle \
+        WhichAP on manually.
+
+        For IT admins (Jamf / MDM):
+        Location Services cannot be pre-granted via MDM configuration profiles — Apple \
+        intentionally requires user consent. However, a Jamf post-install script can \
+        pre-authorize the app via locationd. See the WhichAP deployment guide for details.
         """
 
         let scrollView = NSScrollView()
@@ -109,6 +135,7 @@ final class HelpWindowController: NSWindowController {
             "Signal Quality",
             "Using the Dropdown",
             "Location Services",
+            "Troubleshooting",
         ]
         for header in headers {
             let range = (helpText as NSString).range(of: header)

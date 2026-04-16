@@ -426,12 +426,19 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     private func handleSelectedFile(_ url: URL) {
-        let path = url.path
         let ext = url.pathExtension.lowercased()
 
-        UserDefaults.standard.set(path, forKey: PrefKey.mappingFilePath)
+        // Store a security-scoped bookmark so the sandbox allows access after reboot
+        if let bookmarkData = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
+            UserDefaults.standard.set(bookmarkData, forKey: "mappingFileBookmark")
+        }
+        UserDefaults.standard.set(url.path, forKey: PrefKey.mappingFilePath)
         filePathLabel.stringValue = url.lastPathComponent
-        filePathLabel.toolTip = path
+        filePathLabel.toolTip = url.path
 
         guard let data = try? Data(contentsOf: url) else { return }
 
