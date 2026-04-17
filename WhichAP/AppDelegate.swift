@@ -1,4 +1,5 @@
 import Cocoa
+import ServiceManagement
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
@@ -29,6 +30,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         BSSIDMapping.shared.loadFromData(data)
                     }
                 }
+            }
+        }
+
+        if #available(macOS 13.0, *) {
+            if SMAppService.mainApp.status != .enabled {
+                try? SMAppService.mainApp.register()
             }
         }
 
