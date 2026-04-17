@@ -723,16 +723,19 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         if bssidText != lastMenuBSSID {
             lastMenuBSSID = bssidText
             bssidItem.title = bssidText
+        }
 
-            // Only look up manufacturer when BSSID actually changes
-            if let bssid = info.bssid {
-                OUILookup.shared.manufacturer(forBSSID: bssid) { [weak self] mfr in
-                    DispatchQueue.main.async {
-                        self?.manufacturerItem.title = "Manufacturer: \(mfr ?? "Unknown")"
-                    }
+        // Manufacturer lookup runs outside BSSID change guard so failed
+        // lookups retry on subsequent polls. OUILookup returns from its
+        // in-memory cache instantly when the OUI is already known, so
+        // this is only expensive on the first successful fetch.
+        if let bssid = info.bssid {
+            OUILookup.shared.manufacturer(forBSSID: bssid) { [weak self] mfr in
+                let text = "Manufacturer: \(mfr ?? "Unknown")"
+                DispatchQueue.main.async {
+                    guard self?.manufacturerItem.title != text else { return }
+                    self?.manufacturerItem.title = text
                 }
-            } else {
-                manufacturerItem.title = "Manufacturer: Unknown"
             }
         }
 

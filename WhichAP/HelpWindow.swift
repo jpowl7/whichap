@@ -57,11 +57,11 @@ final class HelpWindowController: NSWindowController {
         ━━━━━━━━━━━━━━
         The menu bar text and Signal line turn red when your connection is Poor or Bad:
 
-        • Excellent: better than -50 dBm
-        • Good: -50 to -60 dBm
-        • Fair: -60 to -70 dBm
-        • Poor: -70 to -80 dBm (red)
-        • Bad: worse than -80 dBm (red)
+        • Excellent: better than -50 dBm (79%+)
+        • Good: -50 to -60 dBm (63–79%)
+        • Fair: -60 to -70 dBm (47–63%)
+        • Poor: -70 to -80 dBm (31–47%) — red
+        • Bad: worse than -80 dBm (<31%) — red
 
         Using the Dropdown
         ━━━━━━━━━━━━━━━━━━
