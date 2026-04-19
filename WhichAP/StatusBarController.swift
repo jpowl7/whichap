@@ -492,7 +492,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             string: "Open Location Settings\u{2026}",
             attributes: [
                 .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
-                .foregroundColor: NSColor.systemBlue,
+                .foregroundColor: NSColor.systemRed,
             ]
         )
         openLocationSettingsItem.action = #selector(openLocationSettings)
@@ -503,7 +503,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             string: "Grant Location Access\u{2026}",
             attributes: [
                 .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
-                .foregroundColor: NSColor.systemBlue,
+                .foregroundColor: NSColor.systemRed,
             ]
         )
         grantLocationAccessItem.action = #selector(grantLocationAccess)

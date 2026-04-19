@@ -34,8 +34,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if #available(macOS 13.0, *) {
-            if SMAppService.mainApp.status != .enabled {
-                try? SMAppService.mainApp.register()
+            let status = SMAppService.mainApp.status
+            if status != .enabled {
+                do {
+                    try SMAppService.mainApp.register()
+                } catch {
+                    NSLog("WhichAP: SMAppService.register() failed: \(error) (status was: \(status.rawValue))")
+                }
             }
         }
 

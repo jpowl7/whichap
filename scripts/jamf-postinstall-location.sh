@@ -23,32 +23,53 @@ if [ "$LOCATION_ENABLED" != "1" ]; then
     /usr/bin/defaults write /var/db/locationd/Library/Preferences/ByHost/com.apple.locationd LocationServicesEnabled -bool true
 fi
 
-# --- Find the WhichAP key in clients.plist (Sonoma+ uses UUID:iBundleId: format) ---
-# The key contains the bundle ID, so grep for it.
+# --- Get the console user for launching the app ---
+LOGGED_IN_USER=$(/usr/bin/stat -f%Su /dev/console)
+LOGGED_IN_UID=""
+if [ -n "$LOGGED_IN_USER" ] && [ "$LOGGED_IN_USER" != "root" ] && [ "$LOGGED_IN_USER" != "loginwindow" ]; then
+    LOGGED_IN_UID=$(/usr/bin/id -u "$LOGGED_IN_USER")
+fi
+
+# --- Find existing locationd entry ---
 PLIST_KEY=""
 if [ -f "$CLIENTS_PLIST" ]; then
-    # Convert to XML, find the key containing our bundle ID
     PLIST_KEY=$(/usr/bin/plutil -convert xml1 -o - "$CLIENTS_PLIST" 2>/dev/null \
         | /usr/bin/grep -o "[^<]*i${BUNDLE_ID}[^<]*" \
         | head -1)
 fi
 
-if [ -z "$PLIST_KEY" ]; then
-    echo "No existing locationd entry found for ${BUNDLE_ID}."
-    echo "The app will register itself on first launch and the user will see the prompt."
-    echo "If this is a Jamf-managed machine, consider running this script after first launch."
-else
+# --- If no entry exists, launch the app briefly to create one ---
+if [ -z "$PLIST_KEY" ] && [ -n "$LOGGED_IN_UID" ]; then
+    echo "No locationd entry found. Launching WhichAP briefly to register with locationd..."
+    /usr/bin/su - "$LOGGED_IN_USER" -c "/usr/bin/open '$APP_PATH'"
+
+    # Wait for locationd to register the app (check every second, up to 15 seconds)
+    for i in $(seq 1 15); do
+        sleep 1
+        PLIST_KEY=$(/usr/bin/plutil -convert xml1 -o - "$CLIENTS_PLIST" 2>/dev/null \
+            | /usr/bin/grep -o "[^<]*i${BUNDLE_ID}[^<]*" \
+            | head -1)
+        if [ -n "$PLIST_KEY" ]; then
+            echo "locationd registered WhichAP after ${i}s."
+            break
+        fi
+    done
+
+    # Kill the app so we can relaunch cleanly after authorization
+    /usr/bin/pkill -x WhichAP 2>/dev/null
+    sleep 1
+fi
+
+# --- Authorize the entry ---
+if [ -n "$PLIST_KEY" ]; then
     echo "Found locationd entry: ${PLIST_KEY}"
     echo "Setting Authorized=true..."
 
-    # Use PlistBuddy to set Authorized on the existing entry
     /usr/libexec/PlistBuddy -c "Set ':${PLIST_KEY}:Authorized' true" "$CLIENTS_PLIST" 2>/dev/null
     if [ $? -ne 0 ]; then
-        # Key doesn't exist yet — add it
         /usr/libexec/PlistBuddy -c "Add ':${PLIST_KEY}:Authorized' bool true" "$CLIENTS_PLIST" 2>/dev/null
     fi
 
-    # Ensure other required fields are set
     /usr/libexec/PlistBuddy -c "Set ':${PLIST_KEY}:BundleId' '${BUNDLE_ID}'" "$CLIENTS_PLIST" 2>/dev/null
     /usr/libexec/PlistBuddy -c "Set ':${PLIST_KEY}:BundlePath' '${APP_PATH}'" "$CLIENTS_PLIST" 2>/dev/null
     /usr/libexec/PlistBuddy -c "Set ':${PLIST_KEY}:Executable' '${EXECUTABLE}'" "$CLIENTS_PLIST" 2>/dev/null
@@ -59,17 +80,18 @@ else
     /bin/launchctl kickstart -k system/com.apple.locationd
 
     echo "Location Services pre-authorized for WhichAP."
+else
+    echo "WARNING: Could not find or create locationd entry for ${BUNDLE_ID}."
+    echo "User will need to grant Location Services manually."
 fi
 
-# --- Set default preferences and launch ---
-# stat -f%Su /dev/console is the most reliable way to get the console user
-# from a root Jamf policy context (per snelson.us/2022/07)
-LOGGED_IN_USER=$(/usr/bin/stat -f%Su /dev/console)
+# --- Set default preferences ---
 if [ -n "$LOGGED_IN_USER" ] && [ "$LOGGED_IN_USER" != "root" ] && [ "$LOGGED_IN_USER" != "loginwindow" ]; then
-    # Set truncateAtColon default
     /usr/bin/su - "$LOGGED_IN_USER" -c "/usr/bin/defaults write '$BUNDLE_ID' truncateAtColon -bool true" 2>/dev/null
+fi
 
-    # Launch the app as the logged-in user
+# --- Launch the app ---
+if [ -n "$LOGGED_IN_USER" ] && [ "$LOGGED_IN_USER" != "root" ] && [ "$LOGGED_IN_USER" != "loginwindow" ]; then
     echo "Launching WhichAP as ${LOGGED_IN_USER}..."
     /usr/bin/su - "$LOGGED_IN_USER" -c "/usr/bin/open '$APP_PATH'"
 fi
