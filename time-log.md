@@ -26,4 +26,8 @@ Only tracks time Claude is actively working (reading, editing, building, researc
 - Estimated ~3 hours active
 - Work: Fixed manufacturer lookup retry bug (was inside BSSID change guard, never retried on failure). Added signal % ranges to Help window. Fixed location action button color (blue → red per Jason's feedback). Rewrote Jamf post-install script to handle fresh installs (launch app briefly to create locationd entry, then authorize). Set up Jamf API Client with stored Keychain credentials — no more manual token prompts. Automated Jamf package record + exclusion group updates via API. Built/deployed 1.8.2 and 1.8.3 via full pipeline. Deployed to ptarwacki and tzinich via blank push — discovered blank push triggers ALL pending policies (FileVault prompt, Ruckus URL, etc.). Audited all 133 Jamf policies, documented full onboarding flow. **Open issue:** locationd Authorized key doesn't persist after launchctl kickstart on fresh installs — needs debugging.
 
-**Running total: ~15 hours active Claude time**
+## 2026-04-19 — Session 6
+- Estimated ~2 hours active
+- Work: Discovered all Granger/pkg builds since 1.7.0 had entitlements stripped during re-signing (codesign --force without --entitlements). This was the root cause of SMAppService login item failures, location authorization issues, and security-scoped bookmark failures on deployed Macs. Fixed by passing --entitlements during re-sign. Updated entitlements file with all four entries. Also discovered launchctl kickstart for locationd is blocked by SIP on all production Macs. Bumped to 1.8.4, deployed to Jason's Mac — macOS location system prompt appeared correctly for the first time on a Jamf install. **Verified post-reboot:** WhichAP auto-launched into menu bar via SMAppService, showed SSID and AP name, no location re-prompt — TCC grant persisted. End-to-end Jamf deploy + entitlements fix confirmed working.
+
+**Running total: ~17 hours active Claude time**
