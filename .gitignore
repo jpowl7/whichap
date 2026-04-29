@@ -8,3 +8,8 @@ DerivedData/
 *~
 AP_to_BSSID_Mapping*
 whichap-mapping.json
+data/
+Building-and-Deploying-via-Jamf.md
+Building-and-Deploying-via-Jamf.docx
+Jamf-Onboarding-Audit.md
+Jamf-Onboarding-Audit.docx

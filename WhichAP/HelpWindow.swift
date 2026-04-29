@@ -52,16 +52,19 @@ final class HelpWindowController: NSWindowController {
         • Truncate AP name at ":" — hides the technical suffix after ":" in AP names
         • Geek mode — changes the menu bar to show SSID:AP Name on the top line \
         and signal%, band, and channel on the bottom line (e.g. 84%|5GHz|ch149)
+        • Signal % style — choose how RSSI maps to a percentage. Standard reads \
+        conservatively (-65 dBm = 56%); Lenient reads friendlier (-65 dBm = 70%). \
+        Underlying dBm and the Poor/Bad warning thresholds are unchanged.
 
         Signal Quality
         ━━━━━━━━━━━━━━
         The menu bar text and Signal line turn red when your connection is Poor or Bad:
 
-        • Excellent: better than -50 dBm (79%+)
-        • Good: -50 to -60 dBm (63–79%)
-        • Fair: -60 to -70 dBm (47–63%)
-        • Poor: -70 to -80 dBm (31–47%) — red
-        • Bad: worse than -80 dBm (<31%) — red
+        • Excellent: better than -50 dBm
+        • Good: -50 to -60 dBm
+        • Fair: -60 to -70 dBm
+        • Poor: -70 to -80 dBm — red
+        • Bad: worse than -80 dBm — red
 
         Using the Dropdown
         ━━━━━━━━━━━━━━━━━━
@@ -71,7 +74,49 @@ final class HelpWindowController: NSWindowController {
         • "Restart Wi-Fi" toggles your Wi-Fi off and back on
         • "Wi-Fi Settings" opens macOS Wi-Fi settings
         • "Mac Uptime" shows how long since your last restart
-        • "Connection History" shows a log of every AP you've connected to
+
+        Connection History
+        ━━━━━━━━━━━━━━━━━━
+        Click "Connection History" in the dropdown to see every AP your Mac has been on \
+        (up to 1000 entries, persisted across restarts). The window shows:
+
+        • Time, AP Name, SSID, Band, Ch, Signal, BSSID — what you connected to
+        • Type — what kind of event each row was:
+          – Roam: mid-session AP switch (different BSSID, same SSID)
+          – Channel: same AP, but it changed channel (often due to interference)
+          – Reconnect: connected again after a brief disconnect
+          – New SSID: connected to a different network
+          – First: the first connection in the session
+        • Left at — signal of the prior AP at the moment you roamed away (helps \
+        spot APs you held too long)
+        • Duration — how long you stayed on each AP
+        • Flag (left column) — automatic problem detection:
+          – Sticky (orange): held a weak AP (< -70 dBm) for over 30 minutes before roaming
+          – Ping-pong (red): bounced between two APs within 60 seconds
+          – Slow roam (yellow): brief disconnect during what should have been a seamless AP switch
+
+        The filter popup at the top narrows the view to All, Roams only, or Problems only. \
+        Refresh pulls in events that happened while the window was open.
+
+        Notifications
+        ━━━━━━━━━━━━━
+        WhichAP can post a macOS notification each time you roam to a new AP. \
+        Off by default. Enable in Preferences → Notifications:
+
+        • Notify on roam events — toggles notifications on/off. The first time you \
+        enable it, macOS will ask permission.
+        • Notify for — choose between "All roams" (every AP change, including \
+        when an AP changes channel on the same BSSID) or "Problems only" \
+        (just sticky / ping-pong / slow-roam events).
+        • Test Notification — fires a sample notification so you can confirm delivery works.
+
+        Notification titles use the SSID name (e.g., "GCCstaffstuffz") so you can \
+        tell at a glance which network the event happened on.
+
+        If you've enabled notifications but aren't seeing banners, the Preferences \
+        screen will show specific guidance — usually "Allow notifications" needs to \
+        be on, or the alert style needs to be Banners or Alerts (not None) in \
+        System Settings → Notifications → WhichAP.
 
         Location Services
         ━━━━━━━━━━━━━━━━━
@@ -104,8 +149,8 @@ final class HelpWindowController: NSWindowController {
 
         For IT admins (Jamf / MDM):
         Location Services cannot be pre-granted via MDM configuration profiles — Apple \
-        intentionally requires user consent. However, a Jamf post-install script can \
-        pre-authorize the app via locationd. See the WhichAP deployment guide for details.
+        intentionally requires user consent. With WhichAP correctly signed (1.8.4+), \
+        the macOS prompt fires reliably on first launch and the user clicks Allow once.
         """
 
         let scrollView = NSScrollView()
@@ -134,6 +179,8 @@ final class HelpWindowController: NSWindowController {
             "Display Options",
             "Signal Quality",
             "Using the Dropdown",
+            "Connection History",
+            "Notifications",
             "Location Services",
             "Troubleshooting",
         ]

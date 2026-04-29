@@ -30,4 +30,7 @@ Only tracks time Claude is actively working (reading, editing, building, researc
 - Estimated ~2 hours active
 - Work: Discovered all Granger/pkg builds since 1.7.0 had entitlements stripped during re-signing (codesign --force without --entitlements). This was the root cause of SMAppService login item failures, location authorization issues, and security-scoped bookmark failures on deployed Macs. Fixed by passing --entitlements during re-sign. Updated entitlements file with all four entries. Also discovered launchctl kickstart for locationd is blocked by SIP on all production Macs. Bumped to 1.8.4, deployed to Jason's Mac — macOS location system prompt appeared correctly for the first time on a Jamf install. **Verified post-reboot:** WhichAP auto-launched into menu bar via SMAppService, showed SSID and AP name, no location re-prompt — TCC grant persisted. End-to-end Jamf deploy + entitlements fix confirmed working.
 
+## 2026-04-28 — Session 7
+- Started 20:36 EDT — picking up 1.9.0 ship checklist (Build 22 already running locally)
+
 **Running total: ~17 hours active Claude time**

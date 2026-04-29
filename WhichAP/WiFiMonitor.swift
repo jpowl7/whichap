@@ -1,6 +1,7 @@
 import Foundation
 import CoreWLAN
 import CoreLocation
+import UserNotifications
 
 // MARK: - LocationAccess
 
@@ -33,8 +34,17 @@ struct WiFiConnectionInfo {
         return rssi - noise
     }
 
-    /// Signal strength as a percentage (0–100), matched to Wi-Fi Signal app.
+    /// Signal strength as a percentage (0–100). Two formulas selectable via
+    /// the `signalPercentStyle` user default:
+    ///   - "standard" (default): clamps to -100..-37, then scales. Reads
+    ///      conservatively (-65 dBm = 56%).
+    ///   - "lenient": original linear mapping `(rssi+100)*2` clamped 0..100.
+    ///      Reads friendlier (-65 dBm = 70%).
     var signalPercent: Int {
+        let style = UserDefaults.standard.string(forKey: "signalPercentStyle") ?? "standard"
+        if style == "lenient" {
+            return max(0, min(100, 2 * (100 + rssi)))
+        }
         let clamped = max(-100, min(-37, rssi))
         return (clamped + 100) * 100 / 63
     }
@@ -83,6 +93,23 @@ struct ConnectionEvent: Codable {
     let apName: String?
     let rssi: Int
     let band: String
+    /// Signal of the prior AP at the moment the client roamed away.
+    /// nil for first-ever connection, post-disconnect reconnects, and pre-1.9.0 entries.
+    let priorRSSI: Int?
+    /// Channel the AP was on at the moment of the event. nil for entries
+    /// recorded before channel was tracked (pre-1.9.0).
+    let channel: Int?
+
+    init(timestamp: Date, ssid: String?, bssid: String?, apName: String?, rssi: Int, band: String, priorRSSI: Int? = nil, channel: Int? = nil) {
+        self.timestamp = timestamp
+        self.ssid = ssid
+        self.bssid = bssid
+        self.apName = apName
+        self.rssi = rssi
+        self.band = band
+        self.priorRSSI = priorRSSI
+        self.channel = channel
+    }
 }
 
 // MARK: - ConnectionHistoryStore
@@ -159,7 +186,15 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
     private var pollState: PollState = .disconnected
 
     private var lastBSSID: String?
+    private var lastRSSI: Int?
+    private var lastChannel: Int?
     private var bssidStableSince: Date?
+
+    /// First event after app launch is always a "fake roam" — fresh process
+    /// state means lastBSSID is nil so the first poll records a reconnect-type
+    /// event even when the user hasn't actually moved. Suppress the notification
+    /// for that first event only.
+    private var hasNotifiedSinceLaunch = false
 
     /// When the current AP connection started (BSSID first seen or changed)
     private(set) var connectedToAPSince: Date?
@@ -282,7 +317,7 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
         ConnectionHistoryStore.shared.save(connectionHistory)
     }
 
-    private func recordConnectionEvent(for info: WiFiConnectionInfo) {
+    private func recordConnectionEvent(for info: WiFiConnectionInfo, priorRSSI: Int?) {
         let fullName = info.bssid.flatMap { BSSIDMapping.shared.apName(forBSSID: $0) }
         let apName = fullName.map { Self.displayName(from: $0) }
         let event = ConnectionEvent(
@@ -291,13 +326,21 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
             bssid: info.bssid,
             apName: apName,
             rssi: info.rssi,
-            band: info.band
+            band: info.band,
+            priorRSSI: priorRSSI,
+            channel: info.channelNumber
         )
         connectionHistory.insert(event, at: 0)
-        if connectionHistory.count > 100 {
-            connectionHistory.removeSubrange(100...)
+        if connectionHistory.count > 1000 {
+            connectionHistory.removeSubrange(1000...)
         }
         ConnectionHistoryStore.shared.save(connectionHistory)
+
+        if hasNotifiedSinceLaunch {
+            RoamNotifier.shared.notifyIfNeeded(events: connectionHistory)
+        } else {
+            hasNotifiedSinceLaunch = true
+        }
     }
 
     func poll() {
@@ -316,6 +359,8 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
             if pollState != .disconnected {
                 pollState = .disconnected
                 lastBSSID = nil
+                lastRSSI = nil
+                lastChannel = nil
                 bssidStableSince = nil
                 connectedToAPSince = nil
                 startPolling(interval: PollInterval.disconnected)
@@ -326,34 +371,52 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
         let currentBSSID = info.bssid
 
         if currentBSSID != lastBSSID {
-            // BSSID changed — record history event and enter roaming state
+            // BSSID changed — record history event and enter roaming state.
+            // priorRSSI captures the OLD AP's last-known signal (the "how bad
+            // did it get before we roamed" number); nil if we came from disconnected.
             let now = Date()
-            recordConnectionEvent(for: info)
+            let priorRSSI = (lastBSSID != nil) ? lastRSSI : nil
+            recordConnectionEvent(for: info, priorRSSI: priorRSSI)
 
             lastBSSID = currentBSSID
+            lastRSSI = info.rssi
+            lastChannel = info.channelNumber
             bssidStableSince = now
             connectedToAPSince = now
             if pollState != .roaming {
                 pollState = .roaming
                 startPolling(interval: PollInterval.roaming)
             }
-        } else if pollState == .roaming {
-            // Same BSSID; check if we've been stable long enough
-            if let stableSince = bssidStableSince,
-               Date().timeIntervalSince(stableSince) >= PollInterval.roamingSettleTime {
-                pollState = .stable
-                startPolling(interval: PollInterval.stable)
-            }
         } else if pollState == .disconnected {
             // Transitioned from disconnected to connected
             let now = Date()
-            recordConnectionEvent(for: info)
+            recordConnectionEvent(for: info, priorRSSI: nil)
 
             lastBSSID = currentBSSID
+            lastRSSI = info.rssi
+            lastChannel = info.channelNumber
             bssidStableSince = now
             connectedToAPSince = now
             pollState = .stable
             startPolling(interval: PollInterval.stable)
+        } else {
+            // Same BSSID — but the AP may have changed channel (interference,
+            // RRM, ChannelFly, etc.). Record a separate event when that happens.
+            // Detected as a non-roam by ConnectionAnalysis (same BSSID as prior).
+            if let prevCh = lastChannel,
+               info.channelNumber != 0,
+               info.channelNumber != prevCh {
+                recordConnectionEvent(for: info, priorRSSI: lastRSSI)
+            }
+            lastRSSI = info.rssi
+            lastChannel = info.channelNumber
+
+            if pollState == .roaming,
+               let stableSince = bssidStableSince,
+               Date().timeIntervalSince(stableSince) >= PollInterval.roamingSettleTime {
+                pollState = .stable
+                startPolling(interval: PollInterval.stable)
+            }
         }
     }
 
@@ -537,3 +600,269 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
         return nil
     }
 }
+
+// MARK: - ConnectionAnalysis
+//
+// Shared, pure helpers used by both `ConnectionHistoryWindow` (to render rows)
+// and `RoamNotifier` (to decide whether to fire a notification on a fresh roam).
+// Operates on the newest-first `[ConnectionEvent]` array — same convention
+// the rest of the app uses.
+
+struct ConnectionAnalysis {
+
+    enum EventType: String {
+        case roam = "Roam"
+        case reconnect = "Reconnect"
+        case newSSID = "New SSID"
+        case first = "First"
+        case channelChange = "Channel"
+    }
+
+    enum ProblemFlag {
+        case none, sticky, pingPong, slowRoam
+    }
+
+    static func eventType(in events: [ConnectionEvent], at index: Int) -> EventType {
+        guard index + 1 < events.count else { return .first }
+        let event = events[index]
+        let prior = events[index + 1]
+        // Same BSSID as the prior event = the AP didn't change, only its channel did.
+        if event.bssid == prior.bssid, event.bssid != nil { return .channelChange }
+        if event.priorRSSI == nil { return .reconnect }
+        if event.ssid != prior.ssid { return .newSSID }
+        return .roam
+    }
+
+    /// Time spent on THIS index's AP — from when we connected until the next
+    /// event replaced it. nil for events[0] (still connected) and for the
+    /// oldest event (no successor known).
+    static func durationOnAP(in events: [ConnectionEvent], at index: Int) -> TimeInterval? {
+        guard index > 0 else { return nil }
+        return events[index - 1].timestamp.timeIntervalSince(events[index].timestamp)
+    }
+
+    /// Signal of THIS index's AP at the moment of leaving. Captured on the
+    /// next-newer event's `priorRSSI`.
+    static func leftAtRSSI(in events: [ConnectionEvent], at index: Int) -> Int? {
+        guard index > 0 else { return nil }
+        return events[index - 1].priorRSSI
+    }
+
+    static func problemFlag(in events: [ConnectionEvent], at index: Int) -> ProblemFlag {
+        let type = eventType(in: events, at: index)
+
+        // Sticky: this row's AP was held a long time, weak signal at leaving.
+        if index > 0,
+           eventType(in: events, at: index - 1) == .roam,
+           let dur = durationOnAP(in: events, at: index),
+           dur > 30 * 60,
+           let leftAt = leftAtRSSI(in: events, at: index),
+           leftAt < -70 {
+            return .sticky
+        }
+
+        // Slow roam: brief disconnect during what should have been a seamless roam.
+        if type == .reconnect,
+           index + 1 < events.count,
+           events[index + 1].ssid == events[index].ssid {
+            let gap = events[index].timestamp.timeIntervalSince(events[index + 1].timestamp)
+            if gap < 30 { return .slowRoam }
+        }
+
+        // Ping-pong: roamed back to the BSSID we were on two events ago, within 60s.
+        if type == .roam,
+           index + 2 < events.count {
+            let twoBack = events[index + 2]
+            if twoBack.bssid == events[index].bssid,
+               events[index].timestamp.timeIntervalSince(twoBack.timestamp) < 60 {
+                return .pingPong
+            }
+        }
+
+        return .none
+    }
+}
+
+// MARK: - RoamNotifier
+//
+// Posts macOS user notifications on roam events. Disabled by default; user
+// flips it on in Preferences, which calls `requestAuthorization()` once. If
+// permission is denied the toggle is force-rolled-back by the caller.
+//
+// Notification mode is read live from UserDefaults each call (cheap, no caching).
+
+final class RoamNotifier: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = RoamNotifier()
+    private override init() {
+        super.init()
+        // Become the delegate so we can opt into foreground banner display —
+        // macOS suppresses banners for the foreground app by default.
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    // MARK: UNUserNotificationCenterDelegate
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
+
+    enum NotifyMode: String {
+        case all
+        case problemsOnly
+    }
+
+    enum PrefKey {
+        static let enabled = "notifyOnRoam"
+        static let mode = "notifyMode"
+    }
+
+    /// Ask macOS for notification permission. Completion fires on main thread
+    /// with the granted flag. Safe to call repeatedly; the system caches the
+    /// answer after the first prompt.
+    func requestPermission(_ completion: @escaping (Bool) -> Void) {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            DispatchQueue.main.async { completion(granted) }
+        }
+    }
+
+    /// Check current authorization status (no prompt). Useful before sending.
+    func currentAuthorizationStatus(_ completion: @escaping (UNAuthorizationStatus) -> Void) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async { completion(settings.authorizationStatus) }
+        }
+    }
+
+    /// Called from `WiFiMonitor.recordConnectionEvent` after the new event has
+    /// been inserted at `events[0]`. Decides whether to post based on user pref
+    /// and the current event's analysis.
+    func notifyIfNeeded(events: [ConnectionEvent]) {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: PrefKey.enabled) else { return }
+        guard !events.isEmpty else { return }
+
+        let modeStr = defaults.string(forKey: PrefKey.mode) ?? NotifyMode.problemsOnly.rawValue
+        let mode = NotifyMode(rawValue: modeStr) ?? .problemsOnly
+
+        // Check fresh roam at index 0 AND the AP we just left at index 1, since
+        // sticky flags the AP that was held (events[1]), not the new one.
+        let flag0 = ConnectionAnalysis.problemFlag(in: events, at: 0)
+        let flag1 = events.count > 1 ? ConnectionAnalysis.problemFlag(in: events, at: 1) : .none
+
+        switch mode {
+        case .all:
+            // Skip the very first event of a session (no actionable info).
+            let type0 = ConnectionAnalysis.eventType(in: events, at: 0)
+            guard type0 != .first else { return }
+            postNotification(title: titleForEvent(events: events), body: bodyForRoam(events: events))
+        case .problemsOnly:
+            if flag0 != .none {
+                postNotification(title: titleForEvent(events: events), body: bodyForFlag(flag0, events: events, at: 0))
+            } else if flag1 != .none {
+                postNotification(title: titleForEvent(events: events), body: bodyForFlag(flag1, events: events, at: 1))
+            }
+        }
+    }
+
+    /// Fire a fake notification for the user to verify delivery works.
+    func sendTestNotification() {
+        postNotification(title: "WhichAP", body: "Test notification — if you see this, WhichAP can deliver roam alerts.")
+    }
+
+    /// Notification title is the SSID of the new connection so a glance at the
+    /// banner tells you which network the event happened on. Falls back to
+    /// "WhichAP" when SSID isn't known.
+    private func titleForEvent(events: [ConnectionEvent]) -> String {
+        events.first?.ssid ?? "WhichAP"
+    }
+
+    // MARK: Body formatting
+
+    private func bodyForRoam(events: [ConnectionEvent]) -> String {
+        let now = events[0]
+        let newAP = now.apName ?? now.bssid ?? "Unknown AP"
+        let type = ConnectionAnalysis.eventType(in: events, at: 0)
+
+        switch type {
+        case .channelChange where events.count > 1:
+            let prevCh = events[1].channel.map { "\($0)" } ?? "?"
+            let nowCh = now.channel.map { "\($0)" } ?? "?"
+            return "\(newAP) changed channel: \(prevCh) → \(nowCh)"
+
+        case .newSSID:
+            // Different network entirely — SSID title already shows the new
+            // network, so "from Y" would be misleading.
+            return "Connected to \(newAP)"
+
+        case .reconnect:
+            // Came through a disconnect; we don't really know if "from X"
+            // is meaningful here (could've slept and moved buildings).
+            return "Reconnected to \(newAP)"
+
+        case .roam where events.count > 1:
+            let prevAP = events[1].apName ?? events[1].bssid ?? "Unknown"
+            return "Roamed to \(newAP) from \(prevAP)"
+
+        default:
+            return "Connected to \(newAP)"
+        }
+    }
+
+    private func bodyForFlag(_ flag: ProblemFlagAlias, events: [ConnectionEvent], at index: Int) -> String {
+        switch flag {
+        case .sticky:
+            let stickyAP = events[index].apName ?? events[index].bssid ?? "Unknown"
+            let nextAP = events[index - 1].apName ?? events[index - 1].bssid ?? "Unknown"
+            let dur = ConnectionAnalysis.durationOnAP(in: events, at: index).map { formatDuration($0) } ?? "?"
+            return "Sticky roam — held \(stickyAP) for \(dur) before switching to \(nextAP)"
+
+        case .pingPong:
+            let now = events[index].apName ?? events[index].bssid ?? "Unknown"
+            let mid = events[index + 1].apName ?? events[index + 1].bssid ?? "Unknown"
+            let prior = events[index + 2].apName ?? events[index + 2].bssid ?? "Unknown"
+            let secs = Int(events[index].timestamp.timeIntervalSince(events[index + 2].timestamp).rounded())
+            return "Ping-pong — bounced \(prior) → \(mid) → \(now) within \(secs)s"
+
+        case .slowRoam:
+            let prevAP = events[index + 1].apName ?? events[index + 1].bssid ?? "Unknown"
+            let gap = Int(events[index].timestamp.timeIntervalSince(events[index + 1].timestamp).rounded())
+            return "Slow roam — \(gap)s disconnect between \(prevAP) sessions"
+
+        case .none:
+            return ""
+        }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        if total < 60 { return "\(total)s" }
+        let minutes = total / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        let remMin = minutes % 60
+        return remMin == 0 ? "\(hours)h" : "\(hours)h \(remMin)m"
+    }
+
+    // MARK: Posting
+
+    private func postNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let req = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil  // deliver immediately
+        )
+        UNUserNotificationCenter.current().add(req) { err in
+            if let err = err { NSLog("WhichAP: notification add failed: \(err)") }
+        }
+    }
+}
+
+/// Internal alias so RoamNotifier doesn't need to fully-qualify everywhere.
+typealias ProblemFlagAlias = ConnectionAnalysis.ProblemFlag

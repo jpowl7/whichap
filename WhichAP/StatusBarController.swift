@@ -1,6 +1,7 @@
 import Cocoa
 import CoreLocation
 import CoreWLAN
+import Darwin
 
 final class StatusBarController: NSObject, WiFiMonitorDelegate {
 
@@ -192,8 +193,23 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     }
 
     private func updateUptime() {
-        let seconds = Int(ProcessInfo.processInfo.systemUptime)
-        uptimeItem.title = "Mac Uptime: \(formatUptime(seconds))"
+        uptimeItem.title = "Mac Uptime: \(formatUptime(systemUptimeSeconds()))"
+    }
+
+    /// True wall-clock seconds since boot, including time spent asleep.
+    /// `ProcessInfo.systemUptime` only counts awake time on macOS, which is why
+    /// the menu used to drift below `uptime(1)` after a sleep.
+    private static let bootDate: Date = {
+        var bt = timeval()
+        var size = MemoryLayout<timeval>.stride
+        guard sysctlbyname("kern.boottime", &bt, &size, nil, 0) == 0 else {
+            return Date(timeIntervalSinceNow: -ProcessInfo.processInfo.systemUptime)
+        }
+        return Date(timeIntervalSince1970: TimeInterval(bt.tv_sec) + TimeInterval(bt.tv_usec) / 1_000_000)
+    }()
+
+    private func systemUptimeSeconds() -> Int {
+        Int(Date().timeIntervalSince(Self.bootDate))
     }
 
     // MARK: - Settings Change Handlers
@@ -866,8 +882,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         let txFormatted = formatTxRate(info.transmitRate)
         let quality = info.signalQuality.rawValue
 
-        let uptimeSeconds = Int(ProcessInfo.processInfo.systemUptime)
-        let uptimeFormatted = formatUptime(uptimeSeconds)
+        let uptimeFormatted = formatUptime(systemUptimeSeconds())
 
         let text = """
         Wi-Fi Connection Info
@@ -896,6 +911,9 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             let controller = ConnectionHistoryWindowController()
             controller.onClear = { [weak self] in
                 self?.wifiMonitor.clearHistory()
+            }
+            controller.onRefresh = { [weak self] in
+                self?.wifiMonitor.connectionHistory ?? []
             }
             historyWindowController = controller
         }

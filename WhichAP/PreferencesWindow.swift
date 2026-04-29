@@ -1,6 +1,7 @@
 import Cocoa
 import CoreWLAN
 import ServiceManagement
+import UserNotifications
 
 // MARK: - UserDefaults Keys
 
@@ -14,6 +15,9 @@ private enum PrefKey {
     static let truncateAtColon   = "truncateAtColon"
     static let geekMode          = "geekMode"
     static let launchAtLogin     = "launchAtLogin"
+    static let notifyOnRoam      = "notifyOnRoam"
+    static let notifyMode        = "notifyMode"
+    static let signalPercentStyle = "signalPercentStyle"
 }
 
 // MARK: - PreferencesWindowController
@@ -32,6 +36,13 @@ final class PreferencesWindowController: NSWindowController {
     private var truncateCheckbox: NSButton!
     private var geekModeCheckbox: NSButton!
     private var launchCheckbox:   NSButton!
+    private var signalStylePopUp: NSPopUpButton!
+
+    // Notifications section
+    private var notifyCheckbox:   NSButton!
+    private var notifyModePopUp:  NSPopUpButton!
+    private var notifyTestButton: NSButton!
+    private var notifyStatusLabel: NSTextField!
 
     // Manual entry controls
     private var mappingEditorController: MappingEditorWindowController?
@@ -73,6 +84,21 @@ final class PreferencesWindowController: NSWindowController {
         buildUI()
         loadCurrentValues()
         updateConditionalVisibility(animated: false)
+
+        // Re-check notification permission whenever the Preferences window
+        // regains focus. Catches the common path of user toggling settings in
+        // System Settings and coming back here expecting the inline status
+        // label to reflect the new state.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidBecomeKeyHandler),
+            name: NSWindow.didBecomeKeyNotification,
+            object: window
+        )
+    }
+
+    @objc private func windowDidBecomeKeyHandler() {
+        refreshNotifyAuthStatus()
     }
 
     override func showWindow(_ sender: Any?) {
@@ -264,6 +290,15 @@ final class PreferencesWindowController: NSWindowController {
         geekModeCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         stackView.addArrangedSubview(geekModeCheckbox)
 
+        // Signal % style
+        stackView.addArrangedSubview(makeFieldLabel("Signal % style"))
+        signalStylePopUp = NSPopUpButton()
+        signalStylePopUp.addItems(withTitles: ["Standard (clamped -37 → -100 dBm)", "Lenient (linear -50 → -100 dBm)"])
+        signalStylePopUp.target = self
+        signalStylePopUp.action = #selector(signalStyleChanged(_:))
+        addWidthConstraint(signalStylePopUp, width: fieldWidth)
+        stackView.addArrangedSubview(signalStylePopUp)
+
         // ── Separator ──────────────────────────────────────────────
 
         stackView.addArrangedSubview(makeSeparator(width: fieldWidth))
@@ -273,6 +308,40 @@ final class PreferencesWindowController: NSWindowController {
         launchCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: self, action: #selector(launchAtLoginChanged(_:)))
         launchCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         stackView.addArrangedSubview(launchCheckbox)
+
+        // ── Separator ──────────────────────────────────────────────
+
+        stackView.addArrangedSubview(makeSeparator(width: fieldWidth))
+
+        // ── Notifications ──────────────────────────────────────────
+
+        stackView.addArrangedSubview(makeSectionLabel("Notifications"))
+
+        notifyCheckbox = NSButton(checkboxWithTitle: "Notify on roam events", target: self, action: #selector(notifyEnabledChanged(_:)))
+        notifyCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        stackView.addArrangedSubview(notifyCheckbox)
+
+        let notifyModeLabel = makeFieldLabel("Notify for")
+        stackView.addArrangedSubview(notifyModeLabel)
+
+        notifyModePopUp = NSPopUpButton()
+        notifyModePopUp.addItems(withTitles: ["Problems only", "All roams"])
+        notifyModePopUp.target = self
+        notifyModePopUp.action = #selector(notifyModeChanged(_:))
+        addWidthConstraint(notifyModePopUp, width: fieldWidth)
+        stackView.addArrangedSubview(notifyModePopUp)
+
+        notifyTestButton = NSButton(title: "Test Notification", target: self, action: #selector(sendTestNotification(_:)))
+        stackView.addArrangedSubview(notifyTestButton)
+
+        notifyStatusLabel = NSTextField(labelWithString: "")
+        notifyStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        notifyStatusLabel.textColor = .systemRed
+        notifyStatusLabel.lineBreakMode = .byWordWrapping
+        notifyStatusLabel.maximumNumberOfLines = 3
+        notifyStatusLabel.isHidden = true
+        addWidthConstraint(notifyStatusLabel, width: fieldWidth)
+        stackView.addArrangedSubview(notifyStatusLabel)
     }
 
     // MARK: - Helpers: View creation
@@ -363,12 +432,75 @@ final class PreferencesWindowController: NSWindowController {
         truncateCheckbox.state = defaults.bool(forKey: PrefKey.truncateAtColon) ? .on : .off
         geekModeCheckbox.state = defaults.bool(forKey: PrefKey.geekMode) ? .on : .off
 
+        let style = defaults.string(forKey: PrefKey.signalPercentStyle) ?? "standard"
+        signalStylePopUp.selectItem(withTitle: style == "lenient"
+            ? "Lenient (linear -50 → -100 dBm)"
+            : "Standard (clamped -37 → -100 dBm)")
+
         if #available(macOS 13.0, *) {
             let status = SMAppService.mainApp.status
             launchCheckbox.state = (status == .enabled) ? .on : .off
         }
 
+        let notifyEnabled = defaults.bool(forKey: PrefKey.notifyOnRoam)
+        notifyCheckbox.state = notifyEnabled ? .on : .off
+        let mode = defaults.string(forKey: PrefKey.notifyMode) ?? "problemsOnly"
+        notifyModePopUp.selectItem(withTitle: mode == "all" ? "All roams" : "Problems only")
+        applyNotifyControlsEnabled(notifyEnabled)
+        refreshNotifyAuthStatus()
+
         updateManualCount()
+    }
+
+    /// Reflects current macOS authorization in the inline status label so the
+    /// user knows why notifications aren't arriving even when the toggle is on.
+    /// Catches the common pitfall where authorization is granted but alert
+    /// style is "None", which silently routes alerts to Notification Center
+    /// only — no banners appear.
+    private func refreshNotifyAuthStatus() {
+        guard notifyCheckbox.state == .on else {
+            notifyStatusLabel.isHidden = true
+            return
+        }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let (message, isWarning) = self.statusMessage(for: settings)
+                if let message = message {
+                    self.notifyStatusLabel.stringValue = message
+                    self.notifyStatusLabel.textColor = isWarning ? .systemRed : .secondaryLabelColor
+                    self.notifyStatusLabel.isHidden = false
+                } else {
+                    self.notifyStatusLabel.isHidden = true
+                }
+                self.sizeWindowToFit()
+            }
+        }
+    }
+
+    private func statusMessage(for settings: UNNotificationSettings) -> (String?, Bool) {
+        switch settings.authorizationStatus {
+        case .denied:
+            return ("Notifications denied. Open System Settings → Notifications → WhichAP and turn on \"Allow notifications\".", true)
+        case .notDetermined:
+            return ("Permission not yet requested. Toggle the checkbox to prompt.", true)
+        case .authorized, .provisional, .ephemeral:
+            // Authorized — but check whether banners will actually appear.
+            if settings.alertSetting == .disabled {
+                return ("Authorized but alerts are off. Open System Settings → Notifications → WhichAP and re-enable \"Allow notifications\".", true)
+            }
+            if settings.alertStyle == .none {
+                return ("Authorized but alert style is None. Open System Settings → Notifications → WhichAP and set Alert Style to Banners or Alerts.", true)
+            }
+            return (nil, false)
+        @unknown default:
+            return (nil, false)
+        }
+    }
+
+    private func applyNotifyControlsEnabled(_ enabled: Bool) {
+        notifyModePopUp.isEnabled = enabled
+        notifyTestButton.isEnabled = enabled
     }
 
     // MARK: - Conditional Visibility
@@ -538,6 +670,12 @@ final class PreferencesWindowController: NSWindowController {
         NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
     }
 
+    @objc private func signalStyleChanged(_ sender: NSPopUpButton) {
+        let value = (sender.titleOfSelectedItem?.hasPrefix("Lenient") == true) ? "lenient" : "standard"
+        UserDefaults.standard.set(value, forKey: PrefKey.signalPercentStyle)
+        NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
+    }
+
     @objc private func launchAtLoginChanged(_ sender: NSButton) {
         let shouldEnable = sender.state == .on
         UserDefaults.standard.set(shouldEnable, forKey: PrefKey.launchAtLogin)
@@ -555,5 +693,37 @@ final class PreferencesWindowController: NSWindowController {
                 alert.runModal()
             }
         }
+    }
+
+    @objc private func notifyEnabledChanged(_ sender: NSButton) {
+        let wantOn = sender.state == .on
+        UserDefaults.standard.set(wantOn, forKey: PrefKey.notifyOnRoam)
+        applyNotifyControlsEnabled(wantOn)
+
+        if wantOn {
+            // Request permission on every flip-to-on. macOS caches the result —
+            // first call shows the prompt, subsequent calls return the cached answer.
+            RoamNotifier.shared.requestPermission { [weak self] granted in
+                guard let self = self else { return }
+                if !granted {
+                    // Roll the toggle back; surface why.
+                    self.notifyCheckbox.state = .off
+                    UserDefaults.standard.set(false, forKey: PrefKey.notifyOnRoam)
+                    self.applyNotifyControlsEnabled(false)
+                }
+                self.refreshNotifyAuthStatus()
+            }
+        } else {
+            refreshNotifyAuthStatus()
+        }
+    }
+
+    @objc private func notifyModeChanged(_ sender: NSPopUpButton) {
+        let value = (sender.titleOfSelectedItem == "All roams") ? "all" : "problemsOnly"
+        UserDefaults.standard.set(value, forKey: PrefKey.notifyMode)
+    }
+
+    @objc private func sendTestNotification(_ sender: NSButton) {
+        RoamNotifier.shared.sendTestNotification()
     }
 }
