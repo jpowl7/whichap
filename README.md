@@ -18,6 +18,7 @@ Instead of a raw BSSID (MAC address), WhichAP displays a friendly AP name like `
 - **Roam pattern flags** — automatically marks Sticky (held a weak AP too long), Ping-pong (rapid flapping between two APs), and Slow-roam (long delay before joining a new AP) events
 - **Channel-change detection** — records a separate event when an AP changes channel without a BSSID change
 - **Roam notifications (opt-in)** — optional macOS notifications when you roam, reconnect, or an AP changes channel. Choose All events or Problems only. Off by default.
+- **Internet reachability** — turns the menu bar red when you're associated to an AP but the internet isn't actually working (captive portal, broken upstream). Probes `captive.apple.com` on connect, roam, wake, and once every 60 seconds as a safety net. The dropdown shows reachable / captive portal / not reachable plus your public (egress) IP via `icanhazip.com`. On by default; toggle in Preferences.
 - **Click to copy** — click any item in the dropdown to copy its value. "Copy All" formats everything for a support ticket.
 - **Restart Wi-Fi** — one-click Wi-Fi toggle from the dropdown, auto-recovers
 - **Wi-Fi Settings** — quick link to macOS Wi-Fi settings

@@ -66,6 +66,23 @@ final class HelpWindowController: NSWindowController {
         • Poor: -70 to -80 dBm — red
         • Bad: worse than -80 dBm — red
 
+        Internet Reachability
+        ━━━━━━━━━━━━━━━━━━━━━
+        On by default. Turns the menu bar red when you're associated to an AP but the \
+        internet isn't actually working — captive portal, broken upstream, etc. Turn off \
+        in Preferences → "Flag missing internet access" if you'd rather the menu bar not \
+        reflect upstream status. Suggested by Clif Guy.
+
+        WhichAP probes once when you connect, once per roam, once on wake from sleep, \
+        and once every 60 seconds as a safety net while you're online — so a mid-session \
+        WAN outage is noticed within a minute. The probe is the same one macOS itself uses \
+        for captive-portal detection (~1 KB to captive.apple.com). The dropdown gains an \
+        "Internet" row (just above "Mac Uptime") showing reachable / captive portal / not \
+        reachable. When reachable, the row also shows your public (egress) IP address via \
+        icanhazip.com — useful for support, VPN diagnostics, and verifying NAT egress. The \
+        IP is refreshed only on association change or when the captive verdict transitions \
+        to reachable, not on every periodic tick.
+
         Using the Dropdown
         ━━━━━━━━━━━━━━━━━━
         • Click any info item to copy its value to the clipboard

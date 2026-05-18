@@ -18,6 +18,7 @@ private enum PrefKey {
     static let notifyOnRoam      = "notifyOnRoam"
     static let notifyMode        = "notifyMode"
     static let signalPercentStyle = "signalPercentStyle"
+    static let checkInternet     = "checkInternet"
 }
 
 // MARK: - PreferencesWindowController
@@ -37,6 +38,7 @@ final class PreferencesWindowController: NSWindowController {
     private var geekModeCheckbox: NSButton!
     private var launchCheckbox:   NSButton!
     private var signalStylePopUp: NSPopUpButton!
+    private var internetCheckCheckbox: NSButton!
 
     // Notifications section
     private var notifyCheckbox:   NSButton!
@@ -290,6 +292,16 @@ final class PreferencesWindowController: NSWindowController {
         geekModeCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         stackView.addArrangedSubview(geekModeCheckbox)
 
+        // Flag missing internet access
+        internetCheckCheckbox = NSButton(checkboxWithTitle: "Flag missing internet access", target: self, action: #selector(internetCheckChanged(_:)))
+        internetCheckCheckbox.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        stackView.addArrangedSubview(internetCheckCheckbox)
+
+        let internetCheckHint = makeFieldLabel("Turns menu bar text red on no-internet")
+        internetCheckHint.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        internetCheckHint.textColor = .secondaryLabelColor
+        stackView.addArrangedSubview(internetCheckHint)
+
         // Signal % style
         stackView.addArrangedSubview(makeFieldLabel("Signal % style"))
         signalStylePopUp = NSPopUpButton()
@@ -431,6 +443,7 @@ final class PreferencesWindowController: NSWindowController {
 
         truncateCheckbox.state = defaults.bool(forKey: PrefKey.truncateAtColon) ? .on : .off
         geekModeCheckbox.state = defaults.bool(forKey: PrefKey.geekMode) ? .on : .off
+        internetCheckCheckbox.state = defaults.bool(forKey: PrefKey.checkInternet) ? .on : .off
 
         let style = defaults.string(forKey: PrefKey.signalPercentStyle) ?? "standard"
         signalStylePopUp.selectItem(withTitle: style == "lenient"
@@ -667,6 +680,12 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func geekModeChanged(_ sender: NSButton) {
         UserDefaults.standard.set(sender.state == .on, forKey: PrefKey.geekMode)
+        NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
+    }
+
+    @objc private func internetCheckChanged(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state == .on, forKey: PrefKey.checkInternet)
+        NotificationCenter.default.post(name: Notification.Name("InternetCheckSettingChanged"), object: nil)
         NotificationCenter.default.post(name: Notification.Name("DisplaySettingsChanged"), object: nil)
     }
 

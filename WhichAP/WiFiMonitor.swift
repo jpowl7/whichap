@@ -2,6 +2,8 @@ import Foundation
 import CoreWLAN
 import CoreLocation
 import UserNotifications
+import Network
+import AppKit
 
 // MARK: - LocationAccess
 
@@ -11,6 +13,15 @@ enum LocationAccess: Equatable {
     case denied
     case restricted
     case systemDisabled
+}
+
+// MARK: - InternetReachability
+
+enum InternetReachability: Equatable {
+    case unknown        // initial state, before first probe completes (or feature off)
+    case reachable      // path satisfied AND probe returned Success body
+    case captive        // probe returned non-Success body (captive portal intercept)
+    case unreachable    // path .unsatisfied OR probe failed N times consecutively
 }
 
 // MARK: - WiFiConnectionInfo
@@ -57,6 +68,17 @@ struct WiFiConnectionInfo {
 
     /// Human-readable signal quality derived from RSSI.
     let signalQuality: SignalQuality
+
+    /// Current internet-reachability state (event-driven, opt-in via the
+    /// `checkInternet` UserDefault). `.unknown` when the feature is off or
+    /// before the first probe has completed.
+    let internetReachability: InternetReachability
+
+    /// Public-facing (egress) IPv4 address as reported by api.ipify.org.
+    /// Fetched once after each successful captive-probe verdict; nil when
+    /// the feature is off, when the verdict is not `.reachable`, or before
+    /// the first ipify response arrives.
+    let externalIPAddress: String?
 }
 
 // MARK: - SignalQuality
@@ -158,7 +180,7 @@ protocol WiFiMonitorDelegate: AnyObject {
 
 // MARK: - WiFiMonitor
 
-final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
+final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate, ReachabilityMonitorDelegate {
 
     // MARK: Polling intervals
 
@@ -196,6 +218,11 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
     /// for that first event only.
     private var hasNotifiedSinceLaunch = false
 
+    /// Optional reachability monitor — only running when the `checkInternet`
+    /// pref is on. When off, `current` stays `.unknown` and the UI ignores it.
+    private let reachabilityMonitor = ReachabilityMonitor()
+    var internetReachability: InternetReachability { reachabilityMonitor.current }
+
     /// When the current AP connection started (BSSID first seen or changed)
     private(set) var connectedToAPSince: Date?
 
@@ -225,7 +252,33 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
         try? wifiClient.startMonitoringEvent(with: .linkDidChange)
         try? wifiClient.startMonitoringEvent(with: .powerDidChange)
 
+        reachabilityMonitor.delegate = self
+        applyReachabilityPref()
+
+        // React to user toggling the pref in Preferences.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(checkInternetSettingChanged),
+            name: Notification.Name("InternetCheckSettingChanged"),
+            object: nil
+        )
+
         startPolling(interval: PollInterval.disconnected)
+    }
+
+    /// Called when the user flips the "Flag missing internet access" toggle.
+    @objc private func checkInternetSettingChanged() {
+        applyReachabilityPref()
+        // Force a refresh so menu bar reflects the new state immediately.
+        DispatchQueue.main.async { [weak self] in self?.poll() }
+    }
+
+    private func applyReachabilityPref() {
+        if UserDefaults.standard.bool(forKey: "checkInternet") {
+            reachabilityMonitor.start()
+        } else {
+            reachabilityMonitor.stop()
+        }
     }
 
     private static func resolveAccess(_ status: CLAuthorizationStatus) -> LocationAccess {
@@ -387,6 +440,8 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
                 pollState = .roaming
                 startPolling(interval: PollInterval.roaming)
             }
+            // New AP — re-probe internet reachability (no-op if pref is off).
+            reachabilityMonitor.networkAssociationChanged()
         } else if pollState == .disconnected {
             // Transitioned from disconnected to connected
             let now = Date()
@@ -399,6 +454,8 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
             connectedToAPSince = now
             pollState = .stable
             startPolling(interval: PollInterval.stable)
+            // Re-associated after a disconnect — re-probe (no-op if pref is off).
+            reachabilityMonitor.networkAssociationChanged()
         } else {
             // Same BSSID — but the AP may have changed channel (interference,
             // RRM, ChannelFly, etc.). Record a separate event when that happens.
@@ -459,8 +516,20 @@ final class WiFiMonitor: NSObject, CLLocationManagerDelegate, CWEventDelegate {
             phyMode: phyMode,
             security: security,
             ipAddress: ipAddress,
-            signalQuality: SignalQuality(rssi: rssi)
+            signalQuality: SignalQuality(rssi: rssi),
+            internetReachability: reachabilityMonitor.current,
+            externalIPAddress: reachabilityMonitor.externalIP
         )
+    }
+
+    // MARK: ReachabilityMonitorDelegate (forwarded as a regular update)
+
+    /// Reachability state changes don't carry new Wi-Fi info, but the menu bar
+    /// needs to repaint (red on captive/unreachable, normal on reachable).
+    /// Re-poll so the freshly-built `WiFiConnectionInfo` carries the new
+    /// `internetReachability` value through the existing delegate path.
+    func reachabilityDidChange(_ reachability: InternetReachability) {
+        poll()
     }
 
     // MARK: AP display name
@@ -866,3 +935,268 @@ final class RoamNotifier: NSObject, UNUserNotificationCenterDelegate {
 
 /// Internal alias so RoamNotifier doesn't need to fully-qualify everywhere.
 typealias ProblemFlagAlias = ConnectionAnalysis.ProblemFlag
+
+// MARK: - ReachabilityMonitor
+
+/// Detects "connected to Wi-Fi but no real internet" (captive portal,
+/// silent blackhole, broken upstream) using a passive `NWPathMonitor`
+/// baseline plus HTTP probes — the same pattern macOS itself uses for
+/// captive-portal detection. Probes fire on association change, wake from
+/// sleep, and every 60 seconds as a safety net so a mid-session WAN-down
+/// is noticed within a minute. Steady-state traffic: one ~1 KB probe to
+/// captive.apple.com per minute.
+///
+/// State is exposed via `current` and via `delegate?.reachabilityDidChange`.
+/// Probe targets `http://captive.apple.com/hotspot-detect.html` and looks
+/// for "Success" in the response body. HTTP (not HTTPS) so captive portals
+/// can intercept and redirect.
+protocol ReachabilityMonitorDelegate: AnyObject {
+    func reachabilityDidChange(_ reachability: InternetReachability)
+}
+
+final class ReachabilityMonitor {
+    private static let probeURL = URL(string: "http://captive.apple.com/hotspot-detect.html")!
+    private static let probeTimeout: TimeInterval = 5.0
+    private static let failureThreshold = 2
+    private static let ipProbeURL = URL(string: "https://icanhazip.com")!
+    private static let ipProbeTimeout: TimeInterval = 5.0
+    private static let periodicInterval: TimeInterval = 60.0
+
+    private let monitorQueue = DispatchQueue(label: "com.grangerchurch.whichap.reachability")
+    private var pathMonitor: NWPathMonitor?
+    private var lastPathStatus: NWPath.Status?
+    private var consecutiveFailures = 0
+    private var probeTask: URLSessionDataTask?
+    private var ipProbeTask: URLSessionDataTask?
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var periodicTimer: Timer?
+    private var isRunning = false
+
+    weak var delegate: ReachabilityMonitorDelegate?
+
+    private(set) var current: InternetReachability = .unknown {
+        didSet {
+            guard oldValue != current else { return }
+            // Drop any stale external IP whenever we're not confidently reachable.
+            if current != .reachable {
+                ipProbeTask?.cancel()
+                ipProbeTask = nil
+                externalIP = nil
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.reachabilityDidChange(self.current)
+            }
+        }
+    }
+
+    /// Public-facing IPv4 address from icanhazip.com. Refreshed only when
+    /// there's a reason to: association change, wake from sleep, or a
+    /// captive verdict that just flipped to `.reachable`. The 60-second
+    /// safety-net captive probe does NOT re-fetch the IP. Cleared when the
+    /// verdict flips away from `.reachable`. Decorative — failures here
+    /// silently leave the value as nil.
+    private(set) var externalIP: String? {
+        didSet {
+            guard oldValue != externalIP else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.reachabilityDidChange(self.current)
+            }
+        }
+    }
+
+    func start() {
+        guard !isRunning else { return }
+        isRunning = true
+        consecutiveFailures = 0
+        lastPathStatus = nil
+        current = .unknown
+
+        // NWPathMonitor instances cannot be restarted after cancel; create fresh.
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.handlePathUpdate(path)
+        }
+        monitor.start(queue: monitorQueue)
+        pathMonitor = monitor
+
+        let nc = NSWorkspace.shared.notificationCenter
+        sleepObserver = nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.handleWillSleep()
+        }
+        wakeObserver = nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.handleDidWake()
+        }
+        schedulePeriodicTimer()
+    }
+
+    func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        probeTask?.cancel()
+        probeTask = nil
+        ipProbeTask?.cancel()
+        ipProbeTask = nil
+        cancelPeriodicTimer()
+        let nc = NSWorkspace.shared.notificationCenter
+        if let s = sleepObserver { nc.removeObserver(s) }
+        if let w = wakeObserver { nc.removeObserver(w) }
+        sleepObserver = nil
+        wakeObserver = nil
+        current = .unknown
+    }
+
+    private func schedulePeriodicTimer() {
+        periodicTimer?.invalidate()
+        let t = Timer(timeInterval: Self.periodicInterval, repeats: true) { [weak self] _ in
+            guard let self, self.isRunning else { return }
+            // Only probe when the OS-level path is usable — no point hitting
+            // the network when NWPathMonitor already says "unsatisfied".
+            if self.lastPathStatus == .satisfied {
+                self.triggerProbe(refreshIP: false)
+            }
+        }
+        t.tolerance = Self.periodicInterval * 0.1
+        RunLoop.main.add(t, forMode: .common)
+        periodicTimer = t
+    }
+
+    private func cancelPeriodicTimer() {
+        periodicTimer?.invalidate()
+        periodicTimer = nil
+    }
+
+    /// Called externally when the SSID or BSSID changes (Wi-Fi roam or
+    /// reconnect) — those don't show up in NWPathMonitor since the path
+    /// stays "satisfied" across most roams. We probe anyway so the verdict
+    /// reflects the new association.
+    func networkAssociationChanged() {
+        guard isRunning else { return }
+        triggerProbe(refreshIP: true)
+    }
+
+    private func handlePathUpdate(_ path: NWPath) {
+        let prev = lastPathStatus
+        lastPathStatus = path.status
+
+        guard path.status == .satisfied else {
+            // Hard failure: no usable path (link down, no DHCP, no route).
+            consecutiveFailures = 0
+            probeTask?.cancel()
+            probeTask = nil
+            current = .unreachable
+            return
+        }
+
+        // Skip probing on cellular tethering / Low Data Mode — trust the OS
+        // and don't burn the user's expensive bytes on a captive-portal probe.
+        if path.isExpensive || path.isConstrained {
+            current = .reachable
+            return
+        }
+
+        // Probe on the .unsatisfied → .satisfied transition (or first start).
+        if prev != .satisfied {
+            triggerProbe(refreshIP: true)
+        }
+    }
+
+    private func handleWillSleep() {
+        probeTask?.cancel()
+        probeTask = nil
+        ipProbeTask?.cancel()
+        ipProbeTask = nil
+        cancelPeriodicTimer()
+        // Leave `current` at last-known so the menu bar doesn't flicker on
+        // sleep — the wake handler will re-probe and refresh.
+    }
+
+    private func handleDidWake() {
+        guard isRunning else { return }
+        schedulePeriodicTimer()
+        triggerProbe(refreshIP: true)
+    }
+
+    private func triggerProbe(refreshIP: Bool) {
+        probeTask?.cancel()
+        var req = URLRequest(url: Self.probeURL)
+        req.httpMethod = "GET"
+        req.timeoutInterval = Self.probeTimeout
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
+            self?.handleProbeResult(data: data, response: response, error: error, refreshIP: refreshIP)
+        }
+        probeTask = task
+        task.resume()
+    }
+
+    private func handleProbeResult(data: Data?, response: URLResponse?, error: Error?, refreshIP: Bool) {
+        if let error = error {
+            // Treat user-cancellation as a no-op (we cancelled to start a new probe).
+            if (error as NSError).code == NSURLErrorCancelled { return }
+            failProbe()
+            return
+        }
+        guard let data, let body = String(data: data, encoding: .utf8) else {
+            failProbe()
+            return
+        }
+        if body.contains("Success") {
+            let wasNotReachable = (current != .reachable)
+            consecutiveFailures = 0
+            current = .reachable
+            // Refresh IP if the caller explicitly asked (association change,
+            // wake from sleep) or if the verdict just flipped from non-reachable
+            // → reachable (captive cleared, WAN came back) — both imply egress
+            // may have changed. Periodic ticks skip this to keep traffic to
+            // icanhazip.com near zero at steady state.
+            if refreshIP || wasNotReachable {
+                triggerIPProbe()
+            }
+        } else {
+            // Apple's well-known body is exactly "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>".
+            // Anything else means a captive portal or proxy intercepted and rewrote the response.
+            consecutiveFailures = 0
+            current = .captive
+        }
+    }
+
+    private func failProbe() {
+        consecutiveFailures += 1
+        if consecutiveFailures >= Self.failureThreshold {
+            current = .unreachable
+        }
+    }
+
+    private func triggerIPProbe() {
+        ipProbeTask?.cancel()
+        var req = URLRequest(url: Self.ipProbeURL)
+        req.httpMethod = "GET"
+        req.timeoutInterval = Self.ipProbeTimeout
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
+            self?.handleIPProbeResult(data: data, response: response, error: error)
+        }
+        ipProbeTask = task
+        task.resume()
+    }
+
+    private func handleIPProbeResult(data: Data?, response: URLResponse?, error: Error?) {
+        if let error = error {
+            if (error as NSError).code == NSURLErrorCancelled { return }
+            return  // missing IP just hides the parenthetical; no retry
+        }
+        guard let data, let body = String(data: data, encoding: .utf8) else { return }
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Sanity: icanhazip returns a bare IP (max 45 chars for IPv6). Anything
+        // longer or containing HTML is a captive-portal redirect — discard.
+        guard !trimmed.isEmpty, trimmed.count <= 45, !trimmed.contains("<") else { return }
+        // Ignore stale results that arrive after a verdict flip.
+        guard current == .reachable else { return }
+        externalIP = trimmed
+    }
+}

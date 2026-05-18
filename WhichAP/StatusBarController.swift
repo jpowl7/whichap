@@ -29,6 +29,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private let bssidItem = NSMenuItem()
     private let manufacturerItem = NSMenuItem()
     private let signalItem = NSMenuItem()
+    private let internetItem = NSMenuItem()
     private let noiseItem = NSMenuItem()
     private let snrItem = NSMenuItem()
     private let bandItem = NSMenuItem()
@@ -271,6 +272,10 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         return UserDefaults.standard.bool(forKey: "geekMode")
     }()
 
+    private var cachedCheckInternet: Bool = {
+        return UserDefaults.standard.bool(forKey: "checkInternet")
+    }()
+
     private func refreshCachedSettings() {
         let val = UserDefaults.standard.integer(forKey: "apNameMaxLength")
         cachedMaxNameLength = val > 0 ? val : 20
@@ -280,6 +285,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             cachedShowBand = UserDefaults.standard.bool(forKey: "showBand")
         }
         cachedGeekMode = UserDefaults.standard.bool(forKey: "geekMode")
+        cachedCheckInternet = UserDefaults.standard.bool(forKey: "checkInternet")
     }
 
     // MARK: - Menu Bar Text (with change tracking)
@@ -288,6 +294,12 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
     private var lastMenuBarTop: String?
     private var lastMenuBarBottom: String?
     private var lastMenuBarPoor: Bool?
+    private var lastMenuBarReachability: InternetReachability?
+    private var lastNeededWidth: CGFloat?
+    private var lastDisplayedSignalPercent: Int?
+    private var lastInternetText: String?
+    private var lastInternetRed: Bool?
+    private var lastInternetVisible: Bool?
     private var lastApDisplayName: String?
     private var lastSignalText: String?
     private var lastSignalPoor: Bool?
@@ -320,6 +332,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             lastMenuBarTop = nil
             lastMenuBarBottom = nil
             lastMenuBarPoor = nil
+            lastMenuBarReachability = nil
             return
         case .notDetermined:
             removeStackView()
@@ -329,6 +342,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             lastMenuBarTop = nil
             lastMenuBarBottom = nil
             lastMenuBarPoor = nil
+            lastMenuBarReachability = nil
             return
         case .authorized:
             break
@@ -343,12 +357,15 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             lastMenuBarTop = nil
             lastMenuBarBottom = nil
             lastMenuBarPoor = nil
+            lastMenuBarReachability = nil
             return
         }
 
         button.appearsDisabled = false
 
         let isPoorSignal = info.signalQuality == .poor || info.signalQuality == .bad
+        let internetBad = cachedCheckInternet && (info.internetReachability == .captive || info.internetReachability == .unreachable)
+        let needsAttention = isPoorSignal || internetBad
 
         let topLine: String
         let bottomLine: String?
@@ -368,7 +385,21 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
                 topLine = ssid
             }
             let compactBand = info.band.replacingOccurrences(of: " ", with: "")
-            bottomLine = "\(info.signalPercent)%|\(compactBand)|ch\(info.channelNumber)"
+            // Hysteresis on displayed signal %: hold the last displayed value while
+            // the actual reading stays within ±2% of it. RSSI jitters ±1–2 dBm even
+            // on a stable AP; without this, the bottom line string would change
+            // every poll, defeat the change-tracking guard below, and schedule
+            // NSStatusItem snapshot redraws across every connected display. When
+            // the user actually moves and the reading shifts beyond the band, the
+            // displayed value snaps to the new precise number.
+            let displayedSignal: Int
+            if let last = lastDisplayedSignalPercent, abs(info.signalPercent - last) <= 2 {
+                displayedSignal = last
+            } else {
+                displayedSignal = info.signalPercent
+                lastDisplayedSignalPercent = info.signalPercent
+            }
+            bottomLine = "\(displayedSignal)%|\(compactBand)|ch\(info.channelNumber)"
         } else {
             // Normal mode: SSID on top, AP name on bottom
             topLine = ssid
@@ -379,20 +410,25 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             }
         }
 
-        // Skip update if nothing changed
-        if topLine == lastMenuBarTop && bottomLine == lastMenuBarBottom && isPoorSignal == lastMenuBarPoor {
+        // Skip update if nothing changed (include reachability so a captive/unreachable
+        // flip actually triggers a redraw).
+        if topLine == lastMenuBarTop
+            && bottomLine == lastMenuBarBottom
+            && needsAttention == lastMenuBarPoor
+            && info.internetReachability == lastMenuBarReachability {
             return
         }
         lastMenuBarTop = topLine
         lastMenuBarBottom = bottomLine
-        lastMenuBarPoor = isPoorSignal
+        lastMenuBarPoor = needsAttention
+        lastMenuBarReachability = info.internetReachability
 
         if let bottomLine {
             button.title = ""
-            setupStackView(topLine: topLine, bottomLine: bottomLine, poorSignal: isPoorSignal, in: button)
+            setupStackView(topLine: topLine, bottomLine: bottomLine, poorSignal: needsAttention, in: button)
         } else {
             removeStackView()
-            if isPoorSignal {
+            if needsAttention {
                 button.attributedTitle = NSAttributedString(string: topLine, attributes: [
                     .foregroundColor: NSColor.systemRed,
                     .font: NSFont.menuBarFont(ofSize: 0),
@@ -448,17 +484,23 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             self.stackView = stack
         }
 
-        // Update button width to fit the wider label
+        // Update button width to fit the wider label, but only when it changed.
+        // Reassigning statusItem.length even with the same value schedules an
+        // NSStatusItem _updateReplicants snapshot redraw on every connected display.
         let topWidth = topLabel.intrinsicContentSize.width
         let bottomWidth = bottomLabel.intrinsicContentSize.width
         let neededWidth = max(topWidth, bottomWidth) + 8
-        statusItem.length = neededWidth
+        if neededWidth != lastNeededWidth {
+            statusItem.length = neededWidth
+            lastNeededWidth = neededWidth
+        }
     }
 
     private func removeStackView() {
         stackView?.removeFromSuperview()
         stackView = nil
         statusItem.length = NSStatusItem.variableLength
+        lastNeededWidth = nil
     }
 
     private func truncatedName(_ name: String, limit: Int) -> String {
@@ -483,6 +525,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         wifiSettingsItem.target = self
         menu.addItem(wifiSettingsItem)
 
+        menu.addItem(internetItem)
         menu.addItem(uptimeItem)
 
         // Location permission UI (shown only when location is denied/restricted/notDetermined)
@@ -541,7 +584,7 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
         menu.addItem(sep1)
 
         // Make all info items clickable to copy
-        let copyableItems = [ssidItem, securityItem, bssidItem, manufacturerItem, signalItem, noiseItem,
+        let copyableItems = [ssidItem, securityItem, bssidItem, manufacturerItem, signalItem, internetItem, noiseItem,
                              snrItem, bandItem, modeItem, txRateItem, ipItem, connectedTimeItem, uptimeItem]
         for item in copyableItems {
             item.target = self
@@ -770,6 +813,44 @@ final class StatusBarController: NSObject, WiFiMonitorDelegate {
             } else {
                 signalItem.attributedTitle = nil
                 signalItem.title = signalText
+            }
+        }
+
+        // Internet reachability — hidden when feature is off OR state is .unknown
+        // (pre-first-probe). Red when captive or unreachable, plain when reachable.
+        let internetVisible = cachedCheckInternet && info.internetReachability != .unknown
+        let internetText: String
+        let internetRed: Bool
+        switch info.internetReachability {
+        case .reachable:
+            if let ip = info.externalIPAddress {
+                internetText = "Internet: reachable (\(ip))"
+            } else {
+                internetText = "Internet: reachable"
+            }
+            internetRed = false
+        case .captive:
+            internetText = "Internet: captive portal"; internetRed = true
+        case .unreachable:
+            internetText = "Internet: not reachable"; internetRed = true
+        case .unknown:
+            internetText = ""; internetRed = false
+        }
+        if internetVisible != lastInternetVisible || internetText != lastInternetText || internetRed != lastInternetRed {
+            lastInternetVisible = internetVisible
+            lastInternetText = internetText
+            lastInternetRed = internetRed
+            internetItem.isHidden = !internetVisible
+            if internetVisible {
+                if internetRed {
+                    internetItem.attributedTitle = NSAttributedString(
+                        string: internetText,
+                        attributes: [.foregroundColor: NSColor.systemRed]
+                    )
+                } else {
+                    internetItem.attributedTitle = nil
+                    internetItem.title = internetText
+                }
             }
         }
 

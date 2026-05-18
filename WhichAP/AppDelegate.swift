@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "showBand": true,
             "truncateAtColon": true,
             "launchAtLogin": true,
+            "checkInternet": true,
         ])
 
         // Load file-based mapping if configured
