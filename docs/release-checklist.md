@@ -114,7 +114,7 @@ Pkg does NOT need notarization (Jamf handles MDM trust).
   - PUT policy 204 back from snapshot, enabled=true, scope restored to
     group 299
 - [ ] Re-arm rollout poll (`/loop 20m check rollout...`) until
-      reasonable cutoff time. Watch smart group 301 grow toward 9
+      reasonable cutoff time. Watch smart group 301 grow toward 14
       members.
 
 ## Post-deploy verification

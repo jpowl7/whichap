@@ -48,3 +48,12 @@ Only tracks time Claude is actively working (reading, editing, building, researc
 - Implemented: AppDelegate `checkInternet` default → true. WiFiMonitor.swift ReachabilityMonitor: renamed ipify* → ipProbe* throughout, switched URL to icanhazip.com, added `periodicTimer` + `schedulePeriodicTimer`/`cancelPeriodicTimer` mirroring the existing `pollTimer` pattern (Timer + 10% tolerance + RunLoop.main `.common`), pause on willSleep/restart on didWake, `triggerProbe(refreshIP: Bool)` threaded through all callers, `handleProbeResult` only triggers IP probe when caller asks OR verdict just flipped to reachable. Updated HelpWindow + README copy. Updated class & property docstrings.
 - Post-change 🔴 5-min CPU gate: 0.0% sustained (0.1% momentary peak during probe), 14 MB stable, 4-7 threads, 0.13s CPU over 300s wall (~0.04% average). Passes gate. All 4 entitlements survived dev-build re-sign.
 - **Deferred to next session:** keepalive LaunchAgent deploy plan (ship via post-install? document as optional?), real-world probe validation over a few days of normal use, full release pipeline (build-pkg.sh all + Jamf 314/301 + canary).
+
+## 2026-05-19 — Session 9
+- Ended ~19:43 EDT, ~45 min active
+- Completed the 1.10.0 Jamf test-group deploy left pending from Session 8 (public GitHub release was already done). Confirmed prior-built `WhichAP-1.10.0-granger.pkg` was correct (172 real APs, 1.10.0/24, `./Applications/WhichAP.app` layout, SHA-512 `160dbc4c…`) — no rebuild needed.
+- 🔴 Local test-install gate: Jason ran `sudo installer -pkg … -target /`; verified `/Applications/WhichAP.app` = 1.10.0 Build 24 with all 4 entitlements intact.
+- CasperShare: Jason SMB-uploaded the pkg. PUT package 314 → 1.10.0 metadata + hash; PUT smart group 301 → "whichAP 1.10.0 installed" / criterion 1.10.0.
+- **Hit Jamf HTTP 409 "Problem with category name"** on the package PUT — root-caused to the "No category assigned" placeholder; fix is to strip the `<category>` element before PUT (applies to policy PUTs + the restore too). Saved as `feedback_jamf_category_409.md`.
+- 🔴 One-Mac canary: snapshot policy 204, narrowed scope to computer 564, Jason ran `sudo jamf policy -id 204` — CasperShare fetch + SHA-512 verify + install + pre/post scripts all succeeded, recon submitted. Restored policy 204 scope to group 299. Smart group 301 = 1 member (564); remaining 13 install on next check-in.
+- Housekeeping: corrected test-group count 9 → 14 in CLAUDE.md and release-checklist.md; updated project_progress.md memory.

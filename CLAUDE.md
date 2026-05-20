@@ -104,7 +104,7 @@ rules live here. For ship-time procedure, see `docs/release-checklist.md`.
   `jamf-api-client` (JSON with `client_id` + `client_secret`, OAuth at
   `/api/oauth/token`)
 - Computer ID 564 = jpowell2051 (dev Mac)
-- Test group ID 299 = "Test WhichAP deploy" (9 Macs)
+- Test group ID 299 = "Test WhichAP deploy" (14 Macs)
 - Smart group ID 301 = "whichAP <current-version> installed"
   (auto-renamed each release; criterion: Application Version is X.Y.Z)
 - Policy ID 204 = "Install WhichAP" (Ongoing, recurring check-in,
